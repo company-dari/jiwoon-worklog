@@ -159,6 +159,7 @@
 <header>
   <h1>📓 지운 업무일지</h1>
   <div class="sp">
+    <button class="icobtn" id="syncBtn" title="동기화">☁️</button>
     <button class="icobtn" id="themeBtn" title="테마">🌙</button>
   </div>
 </header>
@@ -317,6 +318,34 @@
   </div>
 </div>
 
+<!-- sync modal -->
+<div class="modal" id="syncModal">
+  <div class="box">
+    <h3 style="margin:0 0 4px">☁️ 기기 간 동기화</h3>
+    <p class="hint">비공개 GitHub 저장소에 일지를 저장해, <b>휴대폰·PC가 같은 내용</b>을 보게 해요. mati.a도 같은 데이터를 읽어요.</p>
+    <div id="syncState" style="margin:14px 0;padding:10px 12px;border-radius:10px;background:var(--surface2);font-size:13.5px;font-weight:700">상태: 연결 안 됨</div>
+    <label class="fld">GitHub 토큰</label>
+    <input type="password" id="syncToken" placeholder="github_pat_... 붙여넣기">
+    <div class="row" style="margin-top:14px">
+      <button class="btn" id="syncConnect">연결</button>
+      <button class="btn ghost" id="syncNow">지금 동기화</button>
+      <button class="btn ghost" id="syncOff" style="margin-left:auto">연결 해제</button>
+    </div>
+    <details style="margin-top:16px;font-size:13px">
+      <summary style="cursor:pointer;font-weight:700;color:var(--sub)">📖 토큰 만드는 법 (처음 1번만)</summary>
+      <ol style="line-height:1.8;padding-left:20px;margin:10px 0;color:var(--sub)">
+        <li><a href="https://github.com/settings/personal-access-tokens/new" target="_blank">github.com/settings/personal-access-tokens/new</a> 열기 (company-dari 로그인 상태)</li>
+        <li><b>Token name</b>: 아무거나 (예: worklog)</li>
+        <li><b>Resource owner</b>: company-dari</li>
+        <li><b>Repository access</b> → <b>Only select repositories</b> → <b>jiwoon-worklog-data</b> 선택</li>
+        <li><b>Permissions</b> → <b>Repository permissions</b> → <b>Contents</b> → <b>Read and write</b></li>
+        <li><b>Generate token</b> → 나온 토큰 복사 → 위에 붙여넣기</li>
+      </ol>
+    </details>
+    <button class="btn ghost" id="syncClose" style="width:100%;margin-top:10px">닫기</button>
+  </div>
+</div>
+
 <div id="toast"></div>
 
 <script>
@@ -324,6 +353,9 @@ const DEFAULT_CATS=[{name:"마케팅",color:"#8b5cf6"},{name:"재무",color:"#16
 function catList(){return db.cats.map(c=>c.name);}
 function catColor(n){const c=db.cats.find(x=>x.name===n);return c?c.color:"#9ca3af";}
 const KEY = "jiwoon_journal_v1";
+const SYNC_KEY="jiwoon_sync";
+const DATA_OWNER="company-dari",DATA_REPO="jiwoon-worklog-data",DATA_PATH="data.json";
+let sync=JSON.parse(localStorage.getItem(SYNC_KEY)||"{}");
 const COL_NAME = {todo:"해야 함", doing:"진행 중", done:"완료"};
 const ORDER = ['todo','doing','done'];
 let _n = 0;
@@ -339,7 +371,8 @@ function seed(){ return { cats:DEFAULT_CATS.map(c=>({...c})), cards:[
   {id:nid(),text:"인스타 콘텐츠 업로드",cat:"마케팅",pri:0,col:"todo"},
   {id:nid(),text:"업무일지 시스템 세팅",cat:"개인",pri:0,col:"doing"},
 ], days:{}, weeks:{}, ideas:["주간 회고를 mati.a가 자동 요약"] }; }
-function save(){ localStorage.setItem(KEY, JSON.stringify(db)); }
+let pulling=false;
+function save(){ localStorage.setItem(KEY, JSON.stringify(db)); if(sync.token&&!pulling)schedulePush(); }
 function nid(){ return "c"+(performance.now()|0)+"_"+(++_n); }
 
 /* ---- date helpers ---- */
@@ -564,6 +597,64 @@ function debounce(fn,ms){let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>f
 let toastT;function toast(msg){const e=document.getElementById('toast');e.textContent=msg;e.classList.add('show');
   clearTimeout(toastT);toastT=setTimeout(()=>e.classList.remove('show'),1400);}
 
+/* ---- sync (GitHub private repo) ---- */
+function renderAll(){renderBoard();refreshDay();refreshWeek();renderInsight();}
+function ensureShape(){db.cats=db.cats||DEFAULT_CATS.map(c=>({...c}));db.cards=db.cards||[];db.days=db.days||{};db.weeks=db.weeks||{};db.insights=db.insights||[];}
+function isEmptyData(d){return !(d.cards&&d.cards.length)&&!Object.keys(d.days||{}).length&&!Object.keys(d.weeks||{}).length&&!(d.insights&&d.insights.length);}
+function b64e(str){return btoa(unescape(encodeURIComponent(str)));}
+function b64d(b64){return decodeURIComponent(Array.prototype.map.call(atob(b64.replace(/\s/g,'')),c=>'%'+('00'+c.charCodeAt(0).toString(16)).slice(-2)).join(''));}
+function persistSync(){localStorage.setItem(SYNC_KEY,JSON.stringify(sync));}
+async function ghReq(method,body){
+  return fetch(`https://api.github.com/repos/${DATA_OWNER}/${DATA_REPO}/contents/${DATA_PATH}`,{
+    method,headers:{Authorization:`Bearer ${sync.token}`,Accept:'application/vnd.github+json'},
+    body:body?JSON.stringify(body):undefined});
+}
+function syncState(s,info){
+  const map={off:['☁️','연결 안 됨'],sync:['🔄','동기화 중…'],ok:['✅','연결됨 · 방금 동기화'],err:['⚠️','오류: '+(info||'')]};
+  const[ic,txt]=map[s]||map.off; syncBtn.textContent=ic;
+  const el=document.getElementById('syncState'); if(el)el.textContent='상태: '+txt;
+}
+const schedulePush=debounce(()=>push(),1200);
+async function push(){ if(!sync.token)return; syncState('sync');
+  try{
+    let body={message:'update '+new Date().toISOString(),content:b64e(JSON.stringify(db)),sha:sync.sha};
+    let r=await ghReq('PUT',body);
+    if(r.status===409||r.status===422){ await pull(); body.sha=sync.sha; body.content=b64e(JSON.stringify(db)); r=await ghReq('PUT',body); }
+    if(r.ok){const j=await r.json();sync.sha=j.content.sha;sync.last=Date.now();persistSync();syncState('ok');}
+    else syncState('err',r.status);
+  }catch(e){syncState('err','네트워크');}
+}
+async function pull(){ if(!sync.token)return false; syncState('sync');
+  try{
+    const r=await ghReq('GET'); if(!r.ok){syncState('err',r.status);return false;}
+    const j=await r.json(); sync.sha=j.sha;
+    const remote=JSON.parse(b64d(j.content));
+    pulling=true; db=remote; ensureShape(); localStorage.setItem(KEY,JSON.stringify(db)); renderAll(); pulling=false;
+    sync.last=Date.now(); persistSync(); syncState('ok'); return true;
+  }catch(e){pulling=false;syncState('err','읽기');return false;}
+}
+async function connectSync(token){
+  sync.token=(token||'').trim(); if(!sync.token)return;
+  syncState('sync');
+  try{
+    const r=await ghReq('GET');
+    if(r.status===401||r.status===403){syncState('err','토큰 권한');toast('토큰이 틀렸거나 권한 부족 ⚠️');sync.token='';return;}
+    if(!r.ok){syncState('err',r.status);return;}
+    const j=await r.json(); sync.sha=j.sha;
+    const remote=JSON.parse(b64d(j.content));
+    if(isEmptyData(remote)){ await push(); toast('이 기기 내용을 올렸어요 ☁️'); }
+    else { pulling=true; db=remote; ensureShape(); localStorage.setItem(KEY,JSON.stringify(db)); renderAll(); pulling=false; toast('서버 내용으로 맞췄어요 ☁️'); }
+    sync.last=Date.now(); persistSync(); syncState('ok');
+  }catch(e){syncState('err','연결');}
+}
+syncBtn.onclick=()=>{document.getElementById('syncToken').value='';syncModal.classList.add('show');syncState(sync.token?'ok':'off');};
+document.getElementById('syncConnect').onclick=()=>{const t=document.getElementById('syncToken').value;if(t)connectSync(t);else if(sync.token)pull();};
+document.getElementById('syncNow').onclick=()=>{sync.token?pull():toast('먼저 토큰을 연결하세요');};
+document.getElementById('syncOff').onclick=()=>{sync={};persistSync();syncState('off');toast('연결 해제됨');};
+document.getElementById('syncClose').onclick=()=>syncModal.classList.remove('show');
+syncModal.onclick=e=>{if(e.target===syncModal)syncModal.classList.remove('show');};
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&sync.token)pull();});
+
 /* ---- theme ---- */
 const root=document.documentElement;
 function setTheme(t){root.setAttribute('data-theme',t);localStorage.setItem('jiwoon_theme',t);
@@ -573,6 +664,7 @@ setTheme(localStorage.getItem('jiwoon_theme')|| (matchMedia('(prefers-color-sche
 
 /* ---- init ---- */
 renderBoard();refreshDay();refreshWeek();renderInsight();
+if(sync.token){syncState('ok');pull();}else{syncState('off');}
 </script>
 </body>
 </html>
