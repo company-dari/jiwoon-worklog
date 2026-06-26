@@ -4,5 +4,11 @@
   "data_sources": ["manual"],
   "update_schedule": "weekly",
   "slack_channel": "#지운-업무일지",
-  "entry_file": "index.html"
+  "entry_file": "index.html",
+  "weekly_job": {
+    "playbook": "mati-weekly-insight.md",
+    "data_repo": "company-dari/jiwoon-worklog-data",
+    "data_file": "data.json",
+    "task": "매주 1회 data.json을 읽어 주간 인사이트를 생성하고 insights 배열에 추가"
+  }
 }

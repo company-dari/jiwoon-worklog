@@ -21,7 +21,7 @@ GitHub Pages (main 브랜치 루트, `index.html`).
 ## 인수인계 (mati.a가 이어받을 일)
 1. **기기 간 동기화 + 영구 저장**: localStorage → GitHub repo 내 마크다운 파일로 저장하도록 연결.
    정적 사이트라 쓰기엔 GitHub 토큰(브라우저 보관) 또는 별도 백엔드 필요.
-2. **주간 자동 인사이트**: 매주 일지(마크다운)를 읽어 패턴·연결·질문 리포트를 생성해 `insights/`에 저장 + Slack(`#지운-업무일지`) 공유.
+2. **주간 자동 인사이트** ✅ 지시서 작성됨 → [`mati-weekly-insight.md`](mati-weekly-insight.md). 매주 `jiwoon-worklog-data/data.json`을 읽어 패턴·연결·질문 인사이트를 생성, `insights` 배열에 추가 (+옵션 Slack `#지운-업무일지` 공유). 남은 건 mati.a를 매주 실행되도록 연결하는 것뿐.
 3. 카테고리/우선순위 기반 자동 집계·리마인드.
 
 > 데이터 원본은 마크다운으로 두는 것을 원칙으로 함 (Obsidian·mati.a 공용). 입력 도구는 이 웹 대시보드.
