@@ -166,7 +166,9 @@
   .netlegend .lg{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:var(--sub)}
   .netlegend .lg .sw{width:11px;height:11px;border-radius:50%;flex:0 0 auto}
   .connrow{display:flex;align-items:center;gap:8px;margin-bottom:7px;background:var(--surface2);border-radius:9px;padding:8px 11px;font-size:13px}
-  .connrow button{margin-left:auto;border:0;background:transparent;color:var(--sub);cursor:pointer;font-size:15px;padding:0 4px}
+  .connrow .cn{flex:0 0 auto;font-weight:600;white-space:nowrap;max-width:40%;overflow:hidden;text-overflow:ellipsis}
+  .connrow input.clbl{flex:1;min-width:0;border:1px solid var(--line);border-radius:8px;padding:6px 9px;font-size:12.5px;background:var(--surface);color:var(--ink)}
+  .connrow button{border:0;background:transparent;color:var(--sub);cursor:pointer;font-size:15px;padding:0 4px}
 
   #toast{position:fixed;bottom:96px;left:50%;transform:translateX(-50%) translateY(20px);z-index:80;
     background:var(--ink);color:var(--bg);padding:11px 20px;border-radius:30px;font-size:13.5px;font-weight:700;
@@ -403,6 +405,9 @@
     <div id="netConns"></div>
     <div class="row" style="gap:6px;margin-top:4px">
       <select id="netConnSel" style="flex:1"></select>
+    </div>
+    <div class="row" style="gap:6px;margin-top:6px">
+      <input type="text" id="netConnLabel" placeholder="관계 (예: 하이록스 11월 같이 출전)" style="flex:1">
       <button class="btn ghost" id="netConnAdd" style="padding:10px 14px">추가</button>
     </div>
     <div class="row" style="margin-top:18px">
@@ -751,6 +756,14 @@ function drawNet(){
     netCtx.strokeStyle=hexA(base,0.4);
     netCtx.beginPath();netCtx.moveTo(a.x,a.y);netCtx.lineTo(b.x,b.y);netCtx.stroke();});
   netCtx.textAlign='center';netCtx.textBaseline='middle';
+  netCtx.font='600 10.5px -apple-system,"Apple SD Gothic Neo","Pretendard",sans-serif';
+  const surf=getCSS('--surface'),sub=getCSS('--sub');
+  db.net.links.forEach(l=>{if(!l.label)return;const a=nodeById(l.s),b=nodeById(l.t);if(!a||!b)return;
+    const mx=(a.x+b.x)/2,my=(a.y+b.y)/2,tw=netCtx.measureText(l.label).width;
+    roundRect(netCtx,mx-tw/2-6,my-9,tw+12,18,9);netCtx.fillStyle=surf;netCtx.fill();
+    netCtx.lineWidth=1;netCtx.strokeStyle=hexA(nodeColor(a.type==='place'?a:b,pc),0.5);netCtx.stroke();
+    netCtx.fillStyle=sub;netCtx.fillText(l.label,mx,my);});
+  netCtx.lineWidth=1.5;
   db.net.nodes.forEach(n=>{const col=nodeColor(n,pc);
     if(n.type==='place'){
       netCtx.font='700 13px -apple-system,"Apple SD Gothic Neo","Pretendard",sans-serif';
@@ -816,14 +829,15 @@ function renderNetConns(){const wrap=document.getElementById('netConns'),sel=doc
   sel.disabled=false;addb.disabled=false;
   const conns=db.net.links.filter(l=>l.s===netEditing||l.t===netEditing);
   wrap.innerHTML=conns.length?conns.map((l,idx)=>{const o=nodeById(l.s===netEditing?l.t:l.s);
-    return `<div class="connrow"><span>${o&&o.type==='place'?'📍':'🙂'} ${escapeHtml(o?o.name:'?')}${l.label?` · <i style="color:var(--sub)">${escapeHtml(l.label)}</i>`:''}</span><button data-rm="${idx}" title="연결 끊기">✕</button></div>`;}).join(''):'<div class="hint">아직 연결이 없어요. 아래에서 추가해요.</div>';
+    return `<div class="connrow"><span class="cn">${o&&o.type==='place'?'📍':'🙂'} ${escapeHtml(o?o.name:'?')}</span><input type="text" class="clbl" data-lk="${idx}" value="${escapeHtml(l.label||'')}" placeholder="관계 메모"><button data-rm="${idx}" title="연결 끊기">✕</button></div>`;}).join(''):'<div class="hint">아직 연결이 없어요. 아래에서 추가해요.</div>';
+  wrap.querySelectorAll('.clbl').forEach(inp=>inp.onchange=()=>{const list=db.net.links.filter(l=>l.s===netEditing||l.t===netEditing),c=list[+inp.dataset.lk];if(c){c.label=inp.value.trim();save();kickNet();}});
   wrap.querySelectorAll('[data-rm]').forEach(b=>b.onclick=()=>{const list=db.net.links.filter(l=>l.s===netEditing||l.t===netEditing),c=list[+b.dataset.rm];
     db.net.links=db.net.links.filter(l=>l!==c);save();renderNetConns();renderNetLegend();kickNet();});
   const others=db.net.nodes.filter(n=>n.id!==netEditing);
   sel.innerHTML='<option value="">+ 연결할 대상…</option>'+others.map(n=>`<option value="${n.id}">${n.type==='place'?'📍':'🙂'} ${escapeHtml(n.name)}</option>`).join('');}
-document.getElementById('netConnAdd').onclick=()=>{const sel=document.getElementById('netConnSel'),tid=sel.value;if(!tid||!netEditing)return;
+document.getElementById('netConnAdd').onclick=()=>{const sel=document.getElementById('netConnSel'),tid=sel.value,lblEl=document.getElementById('netConnLabel'),label=lblEl?lblEl.value.trim():'';if(!tid||!netEditing)return;
   if(db.net.links.some(l=>(l.s===netEditing&&l.t===tid)||(l.t===netEditing&&l.s===tid))){toast('이미 연결돼 있어요');return;}
-  db.net.links.push({s:netEditing,t:tid,label:''});save();renderNetConns();renderNetLegend();kickNet();toast('연결됨 🔗');};
+  db.net.links.push({s:netEditing,t:tid,label});if(lblEl)lblEl.value='';save();renderNetConns();renderNetLegend();kickNet();toast('연결됨 🔗');};
 function readNetFields(n){n.phone=document.getElementById('netMPhone').value.trim();
   n.insta=instaHandle(document.getElementById('netMInsta').value);
   n.memo=document.getElementById('netMMemo').value.trim();}
