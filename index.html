@@ -392,6 +392,13 @@
       <button data-ty="person" class="on">🙂 사람</button>
       <button data-ty="place">📍 장소·모임</button>
     </div>
+    <label class="fld">📱 전화번호</label>
+    <input type="text" id="netMPhone" inputmode="tel" placeholder="010-0000-0000">
+    <label class="fld">📷 인스타그램</label>
+    <input type="text" id="netMInsta" placeholder="@아이디 (또는 아이디)">
+    <div id="netInstaLink" style="margin-top:6px"></div>
+    <label class="fld">📝 메모 · 이벤트</label>
+    <textarea id="netMMemo" placeholder="어디서 만났는지, 이벤트, 특징 등 자유롭게" style="min-height:70px"></textarea>
     <label class="fld">🔗 연결</label>
     <div id="netConns"></div>
     <div class="row" style="gap:6px;margin-top:4px">
@@ -671,7 +678,13 @@ function toMd(){let s="# 🗂️ 업무 보드\n\n";
     db.net.nodes.filter(n=>n.type==='place').forEach(pl=>{s+=`## 📍 ${pl.name}\n`;
       db.net.links.filter(l=>l.s===pl.id||l.t===pl.id).forEach(l=>{const o=nodeById(l.s===pl.id?l.t:l.s);if(o&&o.type==='person')s+=`- ${o.name}${l.label?` (${l.label})`:''}\n`;});s+="\n";});
     const pp=db.net.links.filter(l=>{const a=nodeById(l.s),b=nodeById(l.t);return a&&b&&a.type==='person'&&b.type==='person';});
-    if(pp.length){s+="## 🙂 사람 간 관계\n";pp.forEach(l=>{const a=nodeById(l.s),b=nodeById(l.t);s+=`- ${a.name} ↔ ${b.name}${l.label?` (${l.label})`:''}\n`;});s+="\n";}}
+    if(pp.length){s+="## 🙂 사람 간 관계\n";pp.forEach(l=>{const a=nodeById(l.s),b=nodeById(l.t);s+=`- ${a.name} ↔ ${b.name}${l.label?` (${l.label})`:''}\n`;});s+="\n";}
+    const detail=db.net.nodes.filter(n=>n.type==='person'&&(n.insta||n.phone||n.memo));
+    if(detail.length){s+="## 📇 인물 상세\n";detail.forEach(n=>{s+=`- **${n.name}**`;
+      if(n.insta)s+=` · 📷 [@${n.insta}](https://instagram.com/${n.insta})`;
+      if(n.phone)s+=` · 📱 ${n.phone}`;
+      if(n.memo)s+=`\n  - 📝 ${n.memo.replace(/\n+/g,' ')}`;
+      s+="\n";});s+="\n";}}
   return s;}
 copyMd.onclick=()=>navigator.clipboard.writeText(toMd()).then(()=>toast("복사됨 ✓"));
 dlMd.onclick=()=>{const b=new Blob([toMd()],{type:'text/markdown'});const a=document.createElement('a');
@@ -728,8 +741,9 @@ function stepNet(){
   netEnergy=e;
 }
 function roundRect(c,x,y,w,h,r){c.beginPath();c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,y+h,r);c.arcTo(x+w,y+h,x,y+h,r);c.arcTo(x,y+h,x,y,r);c.arcTo(x,y,x+w,y,r);c.closePath();}
+function netBadge(x,y,accent){netCtx.beginPath();netCtx.arc(x,y,4.5,0,Math.PI*2);netCtx.fillStyle=accent;netCtx.fill();netCtx.lineWidth=1.5;netCtx.strokeStyle='#fff';netCtx.stroke();netCtx.lineWidth=1.5;}
 function drawNet(){
-  const {w,h}=netDims(),pc=placeColors(),ink=getCSS('--ink');
+  const {w,h}=netDims(),pc=placeColors(),ink=getCSS('--ink'),accent=getCSS('--accent');
   netCtx.clearRect(0,0,w,h);
   netCtx.lineWidth=1.5;netCtx.lineCap='round';
   db.net.links.forEach(l=>{const a=nodeById(l.s),b=nodeById(l.t);if(!a||!b)return;
@@ -743,12 +757,14 @@ function drawNet(){
       const tw=netCtx.measureText(n.name).width,pw=Math.max(56,tw+26),ph=32;n._w=pw;n._h=ph;
       roundRect(netCtx,n.x-pw/2,n.y-ph/2,pw,ph,16);netCtx.fillStyle=col;netCtx.fill();
       netCtx.fillStyle='#fff';netCtx.fillText(n.name,n.x,n.y+0.5);
+      if(n.memo||n.insta||n.phone)netBadge(n.x+pw/2-5,n.y-ph/2+5,accent);
     } else {
       const r=17;n._r=r;
       netCtx.beginPath();netCtx.arc(n.x,n.y,r,0,Math.PI*2);netCtx.fillStyle=col;netCtx.fill();
       netCtx.lineWidth=2;netCtx.strokeStyle=hexA(col,0.3);netCtx.stroke();netCtx.lineWidth=1.5;
       netCtx.font='600 12px -apple-system,"Apple SD Gothic Neo","Pretendard",sans-serif';
       netCtx.fillStyle=ink;netCtx.fillText(n.name,n.x,n.y+r+11);
+      if(n.memo||n.insta||n.phone)netBadge(n.x+r*0.72,n.y-r*0.72,accent);
     }});
 }
 function netHit(x,y){for(let i=db.net.nodes.length-1;i>=0;i--){const n=db.net.nodes[i];
@@ -781,9 +797,17 @@ function renderNetLegend(){const el=document.getElementById('netLegend');if(!el)
   el.innerHTML=places.map(pl=>`<span class="lg"><span class="sw" style="background:${pc[pl.id]}"></span>${escapeHtml(pl.name)}</span>`).join('')+`<span class="lg"><span class="sw" style="background:#94a3b8"></span>기타</span>`;}
 function setNetType(t){netMType=t;document.querySelectorAll('#netMType button').forEach(b=>b.classList.toggle('on',b.dataset.ty===t));}
 document.querySelectorAll('#netMType button').forEach(b=>b.onclick=()=>setNetType(b.dataset.ty));
+function instaHandle(v){return (v||'').trim().replace(/^@+/,'').replace(/^https?:\/\/(www\.)?instagram\.com\//i,'').replace(/[/?].*$/,'').trim();}
+function updateInstaLink(){const v=instaHandle(document.getElementById('netMInsta').value);const el=document.getElementById('netInstaLink');
+  el.innerHTML=v?`<a href="https://instagram.com/${encodeURIComponent(v)}" target="_blank" rel="noopener" style="font-size:12.5px;color:var(--accent);font-weight:700;text-decoration:none">→ @${escapeHtml(v)} 프로필 열기 ↗</a>`:'';}
+document.getElementById('netMInsta').addEventListener('input',updateInstaLink);
 function openNetNode(id){netEditing=id;const n=id?nodeById(id):null;
   document.getElementById('netMTitle').textContent=n?'수정':'새 항목';
   document.getElementById('netMName').value=n?n.name:'';
+  document.getElementById('netMPhone').value=n&&n.phone?n.phone:'';
+  document.getElementById('netMInsta').value=n&&n.insta?n.insta:'';
+  document.getElementById('netMMemo').value=n&&n.memo?n.memo:'';
+  updateInstaLink();
   setNetType(n?n.type:'person');
   document.getElementById('netMDel').style.display=n?'':'none';
   renderNetConns();netModal.classList.add('show');setTimeout(()=>document.getElementById('netMName').focus(),80);}
@@ -800,9 +824,12 @@ function renderNetConns(){const wrap=document.getElementById('netConns'),sel=doc
 document.getElementById('netConnAdd').onclick=()=>{const sel=document.getElementById('netConnSel'),tid=sel.value;if(!tid||!netEditing)return;
   if(db.net.links.some(l=>(l.s===netEditing&&l.t===tid)||(l.t===netEditing&&l.s===tid))){toast('이미 연결돼 있어요');return;}
   db.net.links.push({s:netEditing,t:tid,label:''});save();renderNetConns();renderNetLegend();kickNet();toast('연결됨 🔗');};
+function readNetFields(n){n.phone=document.getElementById('netMPhone').value.trim();
+  n.insta=instaHandle(document.getElementById('netMInsta').value);
+  n.memo=document.getElementById('netMMemo').value.trim();}
 document.getElementById('netMSave').onclick=()=>{const name=document.getElementById('netMName').value.trim();if(!name){netModal.classList.remove('show');return;}
-  if(netEditing){const n=nodeById(netEditing);n.name=name;n.type=netMType;}
-  else{const d=netDims(),n={id:nid(),name,type:netMType,x:d.w/2+(Math.random()*50-25),y:d.h/2+(Math.random()*50-25),vx:0,vy:0};db.net.nodes.push(n);netEditing=n.id;
+  if(netEditing){const n=nodeById(netEditing);n.name=name;n.type=netMType;readNetFields(n);}
+  else{const d=netDims(),n={id:nid(),name,type:netMType,x:d.w/2+(Math.random()*50-25),y:d.h/2+(Math.random()*50-25),vx:0,vy:0};readNetFields(n);db.net.nodes.push(n);netEditing=n.id;
     document.getElementById('netMTitle').textContent='수정';document.getElementById('netMDel').style.display='';}
   save();renderNetConns();renderNetLegend();kickNet();toast('저장됨 ✓');};
 document.getElementById('netMDel').onclick=()=>{if(!netEditing)return;
