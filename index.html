@@ -159,6 +159,8 @@
   .netwrap{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden}
   .nettools{display:flex;gap:7px;flex-wrap:wrap;padding:12px;border-bottom:1px solid var(--line)}
   .nettools .btn{padding:9px 14px;font-size:13px}
+  .netzoom{margin-left:auto;display:flex;gap:5px}
+  .netzoom .btn{padding:9px 13px;font-weight:800;min-width:38px}
   #netCanvas{display:block;width:100%;height:60vh;min-height:400px;touch-action:none;cursor:grab;
     background:radial-gradient(circle at 50% 42%,var(--accent-soft),transparent 68%)}
   #netCanvas:active{cursor:grabbing}
@@ -288,11 +290,16 @@
         <button class="btn" id="netAddPerson">🙂 인물 추가</button>
         <button class="btn ghost" id="netAddPlace">📍 장소·모임 추가</button>
         <button class="btn ghost" id="netTidy">🧹 자동 배치</button>
+        <div class="netzoom">
+          <button class="btn ghost" id="netZoomOut" title="축소">－</button>
+          <button class="btn ghost" id="netZoomReset" title="전체 맞춤">⤢</button>
+          <button class="btn ghost" id="netZoomIn" title="확대">＋</button>
+        </div>
       </div>
       <canvas id="netCanvas"></canvas>
       <div class="netlegend" id="netLegend"></div>
     </div>
-    <p class="hint" style="margin-top:12px">💡 점을 <b>드래그</b>해 옮기고, <b>탭(클릭)</b>하면 이름·연결을 편집해요. 장소(📍)를 중심으로 사람들이 거미줄처럼 이어지고, 한 사람이 여러 장소에 연결될 수 있어요. 저장 내용은 동기화돼 mati.a도 같은 관계도를 봐요.</p>
+    <p class="hint" style="margin-top:12px">💡 점을 <b>드래그</b>해 옮기고, <b>탭(클릭)</b>하면 이름·연결을 편집해요. <b>빈 곳 드래그</b>로 화면 이동, <b>마우스 휠</b>(모바일은 두 손가락 오므리기)로 확대·축소, <b>⤢</b>로 전체 맞춤. 저장 내용은 동기화돼 mati.a도 같은 관계도를 봐요.</p>
   </section>
 
   <!-- EXPORT -->
@@ -699,6 +706,7 @@ dlMd.onclick=()=>{const b=new Blob([toMd()],{type:'text/markdown'});const a=docu
 const PLACE_PAL=["#8b5cf6","#f97316","#0ea5e9","#16a34a","#ec4899","#eab308","#14b8a6","#ef4444"];
 let netCanvas,netCtx,netRAF=null,netActive=false,netDPR=1,netBound=false;
 let netDrag=null,netDownPos=null,netMoved=false,netEnergy=1,netEditing=null,netMType='person';
+let netView={k:1,x:0,y:0};
 function defaultNet(){
   const N=(name,type)=>({id:nid(),name,type});
   const sb=N('스타브리드','place'),js=N('자스 카페','place'),bk=N('수요 독서모임','place');
@@ -749,7 +757,9 @@ function roundRect(c,x,y,w,h,r){c.beginPath();c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,
 function netBadge(x,y,accent){netCtx.beginPath();netCtx.arc(x,y,4.5,0,Math.PI*2);netCtx.fillStyle=accent;netCtx.fill();netCtx.lineWidth=1.5;netCtx.strokeStyle='#fff';netCtx.stroke();netCtx.lineWidth=1.5;}
 function drawNet(){
   const {w,h}=netDims(),pc=placeColors(),ink=getCSS('--ink'),accent=getCSS('--accent');
+  netCtx.setTransform(netDPR,0,0,netDPR,0,0);
   netCtx.clearRect(0,0,w,h);
+  netCtx.setTransform(netDPR*netView.k,0,0,netDPR*netView.k,netDPR*netView.x,netDPR*netView.y);
   netCtx.lineWidth=1.5;netCtx.lineCap='round';
   db.net.links.forEach(l=>{const a=nodeById(l.s),b=nodeById(l.t);if(!a||!b)return;
     const base=nodeColor(a.type==='place'?a:b,pc);
@@ -790,20 +800,41 @@ function netResize(){netDPR=Math.min(window.devicePixelRatio||1,2);
   const w=netCanvas.clientWidth,h=netCanvas.clientHeight;
   netCanvas.width=Math.round(w*netDPR);netCanvas.height=Math.round(h*netDPR);
   netCtx.setTransform(netDPR,0,0,netDPR,0,0);}
+function screenPos(e){const r=netCanvas.getBoundingClientRect();return{x:e.clientX-r.left,y:e.clientY-r.top};}
+function toWorld(s){return{x:(s.x-netView.x)/netView.k,y:(s.y-netView.y)/netView.k};}
+function zoomAt(sx,sy,nk){nk=Math.max(0.3,Math.min(3,nk));
+  netView.x=sx-(sx-netView.x)*(nk/netView.k);netView.y=sy-(sy-netView.y)*(nk/netView.k);netView.k=nk;drawNet();}
+function netFit(){const ns=db.net.nodes;if(!ns.length)return;let minx=1e9,miny=1e9,maxx=-1e9,maxy=-1e9;
+  ns.forEach(n=>{if(typeof n.x!=='number')return;minx=Math.min(minx,n.x);miny=Math.min(miny,n.y);maxx=Math.max(maxx,n.x);maxy=Math.max(maxy,n.y);});
+  if(minx>maxx)return;const {w,h}=netDims(),pad=80,bw=Math.max(1,maxx-minx),bh=Math.max(1,maxy-miny);
+  const k=Math.max(0.3,Math.min(1.6,Math.min((w-pad*2)/bw,(h-pad*2)/bh)));
+  netView.k=k;netView.x=w/2-((minx+maxx)/2)*k;netView.y=h/2-((miny+maxy)/2)*k;drawNet();}
 function bindNet(){ if(netBound)return;netBound=true;
-  const pos=e=>{const r=netCanvas.getBoundingClientRect();return{x:e.clientX-r.left,y:e.clientY-r.top};};
-  netCanvas.addEventListener('pointerdown',e=>{const p=pos(e),n=netHit(p.x,p.y);
-    if(n){netDrag=n;netDownPos=p;netMoved=false;n._ox=p.x-n.x;n._oy=p.y-n.y;try{netCanvas.setPointerCapture(e.pointerId);}catch(_){}kickNet();}});
-  netCanvas.addEventListener('pointermove',e=>{if(!netDrag)return;const p=pos(e);
-    if(Math.hypot(p.x-netDownPos.x,p.y-netDownPos.y)>4)netMoved=true;
-    netDrag.x=p.x-netDrag._ox;netDrag.y=p.y-netDrag._oy;netDrag.vx=0;netDrag.vy=0;kickNet();});
-  const up=()=>{if(!netDrag)return;const wasClick=!netMoved,n=netDrag;netDrag=null;
-    if(wasClick)openNetNode(n.id);else save();kickNet();};
-  netCanvas.addEventListener('pointerup',up);netCanvas.addEventListener('pointercancel',up);
-  window.addEventListener('resize',()=>{if(netActive){netResize();kickNet();}});
+  const ptrs=new Map();let panStart=null,pinch=null;
+  netCanvas.addEventListener('pointerdown',e=>{const s=screenPos(e);ptrs.set(e.pointerId,s);
+    try{netCanvas.setPointerCapture(e.pointerId);}catch(_){}
+    if(ptrs.size===2){const p=[...ptrs.values()];pinch={d:Math.hypot(p[0].x-p[1].x,p[0].y-p[1].y),mx:(p[0].x+p[1].x)/2,my:(p[0].y+p[1].y)/2};netDrag=null;panStart=null;return;}
+    const w=toWorld(s),n=netHit(w.x,w.y);
+    if(n){netDrag=n;netDownPos=s;netMoved=false;n._ox=w.x-n.x;n._oy=w.y-n.y;kickNet();}
+    else{panStart={x:s.x,y:s.y,vx:netView.x,vy:netView.y};}});
+  netCanvas.addEventListener('pointermove',e=>{if(!ptrs.has(e.pointerId))return;const s=screenPos(e);ptrs.set(e.pointerId,s);
+    if(ptrs.size>=2&&pinch){const p=[...ptrs.values()],d=Math.hypot(p[0].x-p[1].x,p[0].y-p[1].y),mx=(p[0].x+p[1].x)/2,my=(p[0].y+p[1].y)/2;
+      if(pinch.d>0)zoomAt(mx,my,netView.k*d/pinch.d);
+      netView.x+=mx-pinch.mx;netView.y+=my-pinch.my;pinch={d,mx,my};drawNet();return;}
+    if(netDrag){if(Math.hypot(s.x-netDownPos.x,s.y-netDownPos.y)>4)netMoved=true;const w=toWorld(s);netDrag.x=w.x-netDrag._ox;netDrag.y=w.y-netDrag._oy;netDrag.vx=0;netDrag.vy=0;kickNet();return;}
+    if(panStart){netView.x=panStart.vx+(s.x-panStart.x);netView.y=panStart.vy+(s.y-panStart.y);drawNet();}});
+  const end=e=>{ptrs.delete(e.pointerId);if(ptrs.size<2)pinch=null;
+    if(netDrag&&ptrs.size===0){const wasClick=!netMoved,n=netDrag;netDrag=null;if(wasClick)openNetNode(n.id);else save();kickNet();}
+    if(ptrs.size===0)panStart=null;};
+  netCanvas.addEventListener('pointerup',end);netCanvas.addEventListener('pointercancel',end);
+  netCanvas.addEventListener('wheel',e=>{e.preventDefault();const s=screenPos(e);zoomAt(s.x,s.y,netView.k*Math.exp(-e.deltaY*0.0015));},{passive:false});
+  document.getElementById('netZoomIn').onclick=()=>{const {w,h}=netDims();zoomAt(w/2,h/2,netView.k*1.25);};
+  document.getElementById('netZoomOut').onclick=()=>{const {w,h}=netDims();zoomAt(w/2,h/2,netView.k/1.25);};
+  document.getElementById('netZoomReset').onclick=()=>netFit();
+  window.addEventListener('resize',()=>{if(netActive){netResize();drawNet();}});
 }
 function onActivateNet(){netShape();netCanvas=document.getElementById('netCanvas');netCtx=netCanvas.getContext('2d');
-  bindNet();netResize();seedPositions();renderNetLegend();kickNet();}
+  bindNet();netResize();seedPositions();renderNetLegend();netFit();kickNet();}
 function netReload(){netShape();if(netActive){seedPositions();renderNetLegend();netResize();kickNet();}}
 function renderNetLegend(){const el=document.getElementById('netLegend');if(!el)return;const pc=placeColors();
   const places=db.net.nodes.filter(n=>n.type==='place');
@@ -853,7 +884,7 @@ document.getElementById('netMCancel').onclick=()=>netModal.classList.remove('sho
 netModal.onclick=e=>{if(e.target===netModal)netModal.classList.remove('show');};
 document.getElementById('netAddPerson').onclick=()=>openNetNode(null);
 document.getElementById('netAddPlace').onclick=()=>{openNetNode(null);setNetType('place');};
-document.getElementById('netTidy').onclick=()=>{db.net.nodes.forEach(n=>{n.x=null;n.y=null;n.vx=0;n.vy=0;});seedPositions();save();kickNet();toast('다시 배치했어요 🧹');};
+document.getElementById('netTidy').onclick=()=>{db.net.nodes.forEach(n=>{n.x=null;n.y=null;n.vx=0;n.vy=0;});netView={k:1,x:0,y:0};seedPositions();save();netFit();kickNet();toast('다시 배치했어요 🧹');};
 
 /* ---- utils ---- */
 function debounce(fn,ms){let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>fn(...a),ms);};}
