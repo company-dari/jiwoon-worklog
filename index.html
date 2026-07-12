@@ -299,7 +299,7 @@
       <canvas id="netCanvas"></canvas>
       <div class="netlegend" id="netLegend"></div>
     </div>
-    <p class="hint" style="margin-top:12px">💡 점을 <b>드래그</b>해 옮기고, <b>탭(클릭)</b>하면 이름·연결을 편집해요. <b>빈 곳 드래그</b>로 화면 이동, <b>마우스 휠</b>(모바일은 두 손가락 오므리기)로 확대·축소, <b>⤢</b>로 전체 맞춤. 저장 내용은 동기화돼 mati.a도 같은 관계도를 봐요.</p>
+    <p class="hint" style="margin-top:12px">💡 점을 <b>드래그</b>해 옮기고, <b>탭(클릭)</b>하면 이름·연결을 편집해요. <b>빈 곳 드래그</b> 또는 트랙패드 <b>두 손가락 스크롤</b>로 화면 이동, <b>핀치(오므리기)</b>로 확대·축소, <b>⤢</b>로 전체 맞춤. 저장 내용은 동기화돼 mati.a도 같은 관계도를 봐요.</p>
   </section>
 
   <!-- EXPORT -->
@@ -827,7 +827,10 @@ function bindNet(){ if(netBound)return;netBound=true;
     if(netDrag&&ptrs.size===0){const wasClick=!netMoved,n=netDrag;netDrag=null;if(wasClick)openNetNode(n.id);else save();kickNet();}
     if(ptrs.size===0)panStart=null;};
   netCanvas.addEventListener('pointerup',end);netCanvas.addEventListener('pointercancel',end);
-  netCanvas.addEventListener('wheel',e=>{e.preventDefault();const s=screenPos(e);zoomAt(s.x,s.y,netView.k*Math.exp(-e.deltaY*0.0015));},{passive:false});
+  netCanvas.addEventListener('wheel',e=>{e.preventDefault();const s=screenPos(e);
+    if(e.ctrlKey){zoomAt(s.x,s.y,netView.k*Math.exp(-e.deltaY*0.01));}          // 트랙패드 핀치 / Ctrl+휠 → 확대·축소
+    else{netView.x-=e.deltaX;netView.y-=e.deltaY;drawNet();}                     // 두 손가락 스크롤 / 휠 → 화면 이동
+  },{passive:false});
   document.getElementById('netZoomIn').onclick=()=>{const {w,h}=netDims();zoomAt(w/2,h/2,netView.k*1.25);};
   document.getElementById('netZoomOut').onclick=()=>{const {w,h}=netDims();zoomAt(w/2,h/2,netView.k/1.25);};
   document.getElementById('netZoomReset').onclick=()=>netFit();
