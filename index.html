@@ -155,6 +155,19 @@
   .seg button.on{background:var(--accent);color:#fff;border-color:var(--accent)}
 
   /* ---------- toast ---------- */
+  /* ---------- network (관계도) ---------- */
+  .netwrap{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden}
+  .nettools{display:flex;gap:7px;flex-wrap:wrap;padding:12px;border-bottom:1px solid var(--line)}
+  .nettools .btn{padding:9px 14px;font-size:13px}
+  #netCanvas{display:block;width:100%;height:60vh;min-height:400px;touch-action:none;cursor:grab;
+    background:radial-gradient(circle at 50% 42%,var(--accent-soft),transparent 68%)}
+  #netCanvas:active{cursor:grabbing}
+  .netlegend{display:flex;gap:12px;flex-wrap:wrap;padding:11px 13px;border-top:1px solid var(--line)}
+  .netlegend .lg{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:var(--sub)}
+  .netlegend .lg .sw{width:11px;height:11px;border-radius:50%;flex:0 0 auto}
+  .connrow{display:flex;align-items:center;gap:8px;margin-bottom:7px;background:var(--surface2);border-radius:9px;padding:8px 11px;font-size:13px}
+  .connrow button{margin-left:auto;border:0;background:transparent;color:var(--sub);cursor:pointer;font-size:15px;padding:0 4px}
+
   #toast{position:fixed;bottom:96px;left:50%;transform:translateX(-50%) translateY(20px);z-index:80;
     background:var(--ink);color:var(--bg);padding:11px 20px;border-radius:30px;font-size:13.5px;font-weight:700;
     opacity:0;pointer-events:none;transition:.25s;box-shadow:0 6px 20px rgba(0,0,0,.25)}
@@ -175,6 +188,7 @@
   <button data-tab="today">📅 오늘 (회고·아이디어)</button>
   <button data-tab="week">🔁 주간 회고</button>
   <button data-tab="insight">✨ 인사이트</button>
+  <button data-tab="network">🕸️ 관계도</button>
   <button data-tab="export">📤 내보내기</button>
 </nav>
 
@@ -265,6 +279,20 @@
     </div>
   </section>
 
+  <!-- NETWORK -->
+  <section class="tab" id="network">
+    <div class="netwrap">
+      <div class="nettools">
+        <button class="btn" id="netAddPerson">🙂 인물 추가</button>
+        <button class="btn ghost" id="netAddPlace">📍 장소·모임 추가</button>
+        <button class="btn ghost" id="netTidy">🧹 자동 배치</button>
+      </div>
+      <canvas id="netCanvas"></canvas>
+      <div class="netlegend" id="netLegend"></div>
+    </div>
+    <p class="hint" style="margin-top:12px">💡 점을 <b>드래그</b>해 옮기고, <b>탭(클릭)</b>하면 이름·연결을 편집해요. 장소(📍)를 중심으로 사람들이 거미줄처럼 이어지고, 한 사람이 여러 장소에 연결될 수 있어요. 저장 내용은 동기화돼 mati.a도 같은 관계도를 봐요.</p>
+  </section>
+
   <!-- EXPORT -->
   <section class="tab" id="export">
     <div class="panel">
@@ -284,6 +312,7 @@
   <button data-tab="today"><span class="i">📅</span>오늘</button>
   <button data-tab="week"><span class="i">🔁</span>주간</button>
   <button data-tab="insight"><span class="i">✨</span>인사이트</button>
+  <button data-tab="network"><span class="i">🕸️</span>관계</button>
   <button data-tab="export"><span class="i">📤</span>내보내기</button>
 </nav>
 
@@ -352,6 +381,31 @@
   </div>
 </div>
 
+<!-- network node modal -->
+<div class="modal" id="netModal">
+  <div class="box">
+    <h3 id="netMTitle" style="margin:0 0 4px">새 항목</h3>
+    <label class="fld">이름</label>
+    <input type="text" id="netMName" placeholder="사람 이름 또는 장소·모임명">
+    <label class="fld">유형</label>
+    <div class="seg" id="netMType">
+      <button data-ty="person" class="on">🙂 사람</button>
+      <button data-ty="place">📍 장소·모임</button>
+    </div>
+    <label class="fld">🔗 연결</label>
+    <div id="netConns"></div>
+    <div class="row" style="gap:6px;margin-top:4px">
+      <select id="netConnSel" style="flex:1"></select>
+      <button class="btn ghost" id="netConnAdd" style="padding:10px 14px">추가</button>
+    </div>
+    <div class="row" style="margin-top:18px">
+      <button class="btn" id="netMSave">저장</button>
+      <button class="btn ghost" id="netMDel">삭제</button>
+      <button class="btn ghost" id="netMCancel" style="margin-left:auto">닫기</button>
+    </div>
+  </div>
+</div>
+
 <div id="toast"></div>
 
 <script>
@@ -372,13 +426,13 @@ let db = load(), filter = null;
 let grouped = localStorage.getItem('jiwoon_grouped')==='1';
 let collapsed = JSON.parse(localStorage.getItem('jiwoon_collapsed')||'{}');
 function load(){ try{ const d=JSON.parse(localStorage.getItem(KEY)); if(!d||!d.cards)return seed();
-  if(!d.cats)d.cats=DEFAULT_CATS.map(c=>({...c})); return d; }catch(e){ return seed(); } }
+  if(!d.cats)d.cats=DEFAULT_CATS.map(c=>({...c})); if(!d.net||!d.net.nodes)d.net=defaultNet(); return d; }catch(e){ return seed(); } }
 function seed(){ return { cats:DEFAULT_CATS.map(c=>({...c})), cards:[
   {id:nid(),text:"거래처 미팅 자료 준비",cat:"거래처",pri:1,col:"todo"},
   {id:nid(),text:"원가 계산서 검토",cat:"재무",pri:0,col:"todo"},
   {id:nid(),text:"인스타 콘텐츠 업로드",cat:"마케팅",pri:0,col:"todo"},
   {id:nid(),text:"업무일지 시스템 세팅",cat:"개인",pri:0,col:"doing"},
-], days:{}, weeks:{}, ideas:["주간 회고를 mati.a가 자동 요약"] }; }
+], days:{}, weeks:{}, ideas:["주간 회고를 mati.a가 자동 요약"], net:defaultNet() }; }
 let pulling=false;
 function save(){ localStorage.setItem(KEY, JSON.stringify(db)); if(sync.token&&!pulling)schedulePush(); }
 function nid(){ return "c"+(performance.now()|0)+"_"+(++_n); }
@@ -406,6 +460,7 @@ function switchTab(name){
   document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x.id===name));
   if(name==='export') renderMd();
   if(name==='insight') renderInsight();
+  if(name==='network') onActivateNet(); else stopNet();
   window.scrollTo({top:0,behavior:'smooth'});
 }
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>switchTab(b.dataset.tab));
@@ -612,10 +667,152 @@ function toMd(){let s="# 🗂️ 업무 보드\n\n";
   const wks=Object.keys(db.weeks).sort().reverse();
   if(wks.length){s+="# 🔁 주간 회고\n\n";wks.forEach(w=>{const o=db.weeks[w];
     s+=`## ${w}\n- 잘된 것: ${o.good||'-'}\n- 아쉬운 것: ${o.bad||'-'}\n- 배운 것: ${o.learn||'-'}\n- 다음 주: ${o.next||'-'}\n\n`;});}
+  if(db.net&&db.net.nodes&&db.net.nodes.length){s+="# 🕸️ 인물 관계도\n\n";
+    db.net.nodes.filter(n=>n.type==='place').forEach(pl=>{s+=`## 📍 ${pl.name}\n`;
+      db.net.links.filter(l=>l.s===pl.id||l.t===pl.id).forEach(l=>{const o=nodeById(l.s===pl.id?l.t:l.s);if(o&&o.type==='person')s+=`- ${o.name}${l.label?` (${l.label})`:''}\n`;});s+="\n";});
+    const pp=db.net.links.filter(l=>{const a=nodeById(l.s),b=nodeById(l.t);return a&&b&&a.type==='person'&&b.type==='person';});
+    if(pp.length){s+="## 🙂 사람 간 관계\n";pp.forEach(l=>{const a=nodeById(l.s),b=nodeById(l.t);s+=`- ${a.name} ↔ ${b.name}${l.label?` (${l.label})`:''}\n`;});s+="\n";}}
   return s;}
 copyMd.onclick=()=>navigator.clipboard.writeText(toMd()).then(()=>toast("복사됨 ✓"));
 dlMd.onclick=()=>{const b=new Blob([toMd()],{type:'text/markdown'});const a=document.createElement('a');
   a.href=URL.createObjectURL(b);a.download='지운-업무일지.md';a.click();};
+
+/* ---- network (관계도) ---- */
+const PLACE_PAL=["#8b5cf6","#f97316","#0ea5e9","#16a34a","#ec4899","#eab308","#14b8a6","#ef4444"];
+let netCanvas,netCtx,netRAF=null,netActive=false,netDPR=1,netBound=false;
+let netDrag=null,netDownPos=null,netMoved=false,netEnergy=1,netEditing=null,netMType='person';
+function defaultNet(){
+  const N=(name,type)=>({id:nid(),name,type});
+  const sb=N('스타브리드','place'),js=N('자스 카페','place'),bk=N('수요 독서모임','place');
+  const kim=N('김코치','person'),minji=N('민지','person'),sh=N('상현','person'),yerin=N('예린','person'),teo=N('태오','person');
+  const L=(a,b,label)=>({s:a.id,t:b.id,label:label||''});
+  return {nodes:[sb,js,bk,kim,minji,sh,yerin,teo],
+    links:[L(sb,kim,'PT 코치'),L(sb,minji),L(sb,sh),L(sb,yerin),L(minji,js,'단골'),L(sh,js),L(yerin,bk),L(teo,bk),L(kim,sh,'친구')]};
+}
+function netShape(){ if(!db.net||!db.net.nodes)db.net=defaultNet(); db.net.links=db.net.links||[]; }
+function nodeById(id){return db.net.nodes.find(n=>n.id===id);}
+function escapeHtml(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function getCSS(v){return getComputedStyle(document.documentElement).getPropertyValue(v).trim()||'#333';}
+function placeColors(){const m={};let i=0;db.net.nodes.filter(n=>n.type==='place').forEach(pl=>{m[pl.id]=pl.color||PLACE_PAL[i++%PLACE_PAL.length];});return m;}
+function nodeColor(n,pc){
+  if(n.type==='place')return pc[n.id];
+  for(const l of db.net.links){
+    if(l.s===n.id){const o=nodeById(l.t);if(o&&o.type==='place')return pc[o.id];}
+    if(l.t===n.id){const o=nodeById(l.s);if(o&&o.type==='place')return pc[o.id];}
+  }
+  return '#94a3b8';
+}
+function netDims(){return {w:netCanvas.clientWidth||760,h:netCanvas.clientHeight||460};}
+function seedPositions(){const {w,h}=netDims();const ga=2.399963;let i=0;
+  db.net.nodes.forEach(n=>{ if(typeof n.x!=='number'||isNaN(n.x)){const r=50+16*i,a=i*ga;n.x=w/2+r*Math.cos(a);n.y=h/2+r*Math.sin(a);} n.vx=n.vx||0;n.vy=n.vy||0; i++; });
+}
+function stepNet(){
+  const ns=db.net.nodes,ls=db.net.links,{w,h}=netDims();
+  const REP=6000,SPRING=0.028,DAMP=0.9,MAXV=16;
+  for(let i=0;i<ns.length;i++){const a=ns[i];
+    for(let j=i+1;j<ns.length;j++){const b=ns[j];
+      let dx=a.x-b.x,dy=a.y-b.y,d2=dx*dx+dy*dy;if(d2<0.01)d2=0.01;
+      if(d2<90000){const d=Math.sqrt(d2),f=REP/d2,fx=dx/d*f,fy=dy/d*f;a.vx+=fx;a.vy+=fy;b.vx-=fx;b.vy-=fy;}
+    }
+  }
+  ls.forEach(l=>{const a=nodeById(l.s),b=nodeById(l.t);if(!a||!b)return;
+    const len=(a.type==='place'||b.type==='place')?118:150;
+    let dx=b.x-a.x,dy=b.y-a.y,d=Math.hypot(dx,dy)||0.01;const f=(d-len)*SPRING,fx=dx/d*f,fy=dy/d*f;
+    a.vx+=fx;a.vy+=fy;b.vx-=fx;b.vy-=fy;});
+  let e=0;
+  ns.forEach(n=>{ if(n===netDrag){n.vx=0;n.vy=0;return;}
+    n.vx=(n.vx+(w/2-n.x)*0.0012)*DAMP; n.vy=(n.vy+(h/2-n.y)*0.0012)*DAMP;
+    if(n.vx>MAXV)n.vx=MAXV;else if(n.vx<-MAXV)n.vx=-MAXV;
+    if(n.vy>MAXV)n.vy=MAXV;else if(n.vy<-MAXV)n.vy=-MAXV;
+    n.x+=n.vx;n.y+=n.vy;e+=n.vx*n.vx+n.vy*n.vy; });
+  netEnergy=e;
+}
+function roundRect(c,x,y,w,h,r){c.beginPath();c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,y+h,r);c.arcTo(x+w,y+h,x,y+h,r);c.arcTo(x,y+h,x,y,r);c.arcTo(x,y,x+w,y,r);c.closePath();}
+function drawNet(){
+  const {w,h}=netDims(),pc=placeColors(),ink=getCSS('--ink');
+  netCtx.clearRect(0,0,w,h);
+  netCtx.lineWidth=1.5;netCtx.lineCap='round';
+  db.net.links.forEach(l=>{const a=nodeById(l.s),b=nodeById(l.t);if(!a||!b)return;
+    const base=nodeColor(a.type==='place'?a:b,pc);
+    netCtx.strokeStyle=hexA(base,0.4);
+    netCtx.beginPath();netCtx.moveTo(a.x,a.y);netCtx.lineTo(b.x,b.y);netCtx.stroke();});
+  netCtx.textAlign='center';netCtx.textBaseline='middle';
+  db.net.nodes.forEach(n=>{const col=nodeColor(n,pc);
+    if(n.type==='place'){
+      netCtx.font='700 13px -apple-system,"Apple SD Gothic Neo","Pretendard",sans-serif';
+      const tw=netCtx.measureText(n.name).width,pw=Math.max(56,tw+26),ph=32;n._w=pw;n._h=ph;
+      roundRect(netCtx,n.x-pw/2,n.y-ph/2,pw,ph,16);netCtx.fillStyle=col;netCtx.fill();
+      netCtx.fillStyle='#fff';netCtx.fillText(n.name,n.x,n.y+0.5);
+    } else {
+      const r=17;n._r=r;
+      netCtx.beginPath();netCtx.arc(n.x,n.y,r,0,Math.PI*2);netCtx.fillStyle=col;netCtx.fill();
+      netCtx.lineWidth=2;netCtx.strokeStyle=hexA(col,0.3);netCtx.stroke();netCtx.lineWidth=1.5;
+      netCtx.font='600 12px -apple-system,"Apple SD Gothic Neo","Pretendard",sans-serif';
+      netCtx.fillStyle=ink;netCtx.fillText(n.name,n.x,n.y+r+11);
+    }});
+}
+function netHit(x,y){for(let i=db.net.nodes.length-1;i>=0;i--){const n=db.net.nodes[i];
+  if(n.type==='place'){if(Math.abs(x-n.x)<=(n._w||56)/2&&Math.abs(y-n.y)<=(n._h||32)/2)return n;}
+  else{if(Math.hypot(x-n.x,y-n.y)<=(n._r||17)+4)return n;}}return null;}
+function loopNet(){stepNet();drawNet();if(netEnergy>0.4||netDrag){netRAF=requestAnimationFrame(loopNet);}else{netRAF=null;}}
+function kickNet(){netActive=true;if(!netRAF)netRAF=requestAnimationFrame(loopNet);}
+function stopNet(){netActive=false;if(netRAF){cancelAnimationFrame(netRAF);netRAF=null;}}
+function netResize(){netDPR=Math.min(window.devicePixelRatio||1,2);
+  const w=netCanvas.clientWidth,h=netCanvas.clientHeight;
+  netCanvas.width=Math.round(w*netDPR);netCanvas.height=Math.round(h*netDPR);
+  netCtx.setTransform(netDPR,0,0,netDPR,0,0);}
+function bindNet(){ if(netBound)return;netBound=true;
+  const pos=e=>{const r=netCanvas.getBoundingClientRect();return{x:e.clientX-r.left,y:e.clientY-r.top};};
+  netCanvas.addEventListener('pointerdown',e=>{const p=pos(e),n=netHit(p.x,p.y);
+    if(n){netDrag=n;netDownPos=p;netMoved=false;n._ox=p.x-n.x;n._oy=p.y-n.y;try{netCanvas.setPointerCapture(e.pointerId);}catch(_){}kickNet();}});
+  netCanvas.addEventListener('pointermove',e=>{if(!netDrag)return;const p=pos(e);
+    if(Math.hypot(p.x-netDownPos.x,p.y-netDownPos.y)>4)netMoved=true;
+    netDrag.x=p.x-netDrag._ox;netDrag.y=p.y-netDrag._oy;netDrag.vx=0;netDrag.vy=0;kickNet();});
+  const up=()=>{if(!netDrag)return;const wasClick=!netMoved,n=netDrag;netDrag=null;
+    if(wasClick)openNetNode(n.id);else save();kickNet();};
+  netCanvas.addEventListener('pointerup',up);netCanvas.addEventListener('pointercancel',up);
+  window.addEventListener('resize',()=>{if(netActive){netResize();kickNet();}});
+}
+function onActivateNet(){netShape();netCanvas=document.getElementById('netCanvas');netCtx=netCanvas.getContext('2d');
+  bindNet();netResize();seedPositions();renderNetLegend();kickNet();}
+function netReload(){netShape();if(netActive){seedPositions();renderNetLegend();netResize();kickNet();}}
+function renderNetLegend(){const el=document.getElementById('netLegend');if(!el)return;const pc=placeColors();
+  const places=db.net.nodes.filter(n=>n.type==='place');
+  el.innerHTML=places.map(pl=>`<span class="lg"><span class="sw" style="background:${pc[pl.id]}"></span>${escapeHtml(pl.name)}</span>`).join('')+`<span class="lg"><span class="sw" style="background:#94a3b8"></span>기타</span>`;}
+function setNetType(t){netMType=t;document.querySelectorAll('#netMType button').forEach(b=>b.classList.toggle('on',b.dataset.ty===t));}
+document.querySelectorAll('#netMType button').forEach(b=>b.onclick=()=>setNetType(b.dataset.ty));
+function openNetNode(id){netEditing=id;const n=id?nodeById(id):null;
+  document.getElementById('netMTitle').textContent=n?'수정':'새 항목';
+  document.getElementById('netMName').value=n?n.name:'';
+  setNetType(n?n.type:'person');
+  document.getElementById('netMDel').style.display=n?'':'none';
+  renderNetConns();netModal.classList.add('show');setTimeout(()=>document.getElementById('netMName').focus(),80);}
+function renderNetConns(){const wrap=document.getElementById('netConns'),sel=document.getElementById('netConnSel'),addb=document.getElementById('netConnAdd');
+  if(!netEditing){wrap.innerHTML='<div class="hint">먼저 저장하면 연결을 추가할 수 있어요.</div>';sel.innerHTML='';sel.disabled=true;addb.disabled=true;return;}
+  sel.disabled=false;addb.disabled=false;
+  const conns=db.net.links.filter(l=>l.s===netEditing||l.t===netEditing);
+  wrap.innerHTML=conns.length?conns.map((l,idx)=>{const o=nodeById(l.s===netEditing?l.t:l.s);
+    return `<div class="connrow"><span>${o&&o.type==='place'?'📍':'🙂'} ${escapeHtml(o?o.name:'?')}${l.label?` · <i style="color:var(--sub)">${escapeHtml(l.label)}</i>`:''}</span><button data-rm="${idx}" title="연결 끊기">✕</button></div>`;}).join(''):'<div class="hint">아직 연결이 없어요. 아래에서 추가해요.</div>';
+  wrap.querySelectorAll('[data-rm]').forEach(b=>b.onclick=()=>{const list=db.net.links.filter(l=>l.s===netEditing||l.t===netEditing),c=list[+b.dataset.rm];
+    db.net.links=db.net.links.filter(l=>l!==c);save();renderNetConns();renderNetLegend();kickNet();});
+  const others=db.net.nodes.filter(n=>n.id!==netEditing);
+  sel.innerHTML='<option value="">+ 연결할 대상…</option>'+others.map(n=>`<option value="${n.id}">${n.type==='place'?'📍':'🙂'} ${escapeHtml(n.name)}</option>`).join('');}
+document.getElementById('netConnAdd').onclick=()=>{const sel=document.getElementById('netConnSel'),tid=sel.value;if(!tid||!netEditing)return;
+  if(db.net.links.some(l=>(l.s===netEditing&&l.t===tid)||(l.t===netEditing&&l.s===tid))){toast('이미 연결돼 있어요');return;}
+  db.net.links.push({s:netEditing,t:tid,label:''});save();renderNetConns();renderNetLegend();kickNet();toast('연결됨 🔗');};
+document.getElementById('netMSave').onclick=()=>{const name=document.getElementById('netMName').value.trim();if(!name){netModal.classList.remove('show');return;}
+  if(netEditing){const n=nodeById(netEditing);n.name=name;n.type=netMType;}
+  else{const d=netDims(),n={id:nid(),name,type:netMType,x:d.w/2+(Math.random()*50-25),y:d.h/2+(Math.random()*50-25),vx:0,vy:0};db.net.nodes.push(n);netEditing=n.id;
+    document.getElementById('netMTitle').textContent='수정';document.getElementById('netMDel').style.display='';}
+  save();renderNetConns();renderNetLegend();kickNet();toast('저장됨 ✓');};
+document.getElementById('netMDel').onclick=()=>{if(!netEditing)return;
+  db.net.nodes=db.net.nodes.filter(n=>n.id!==netEditing);db.net.links=db.net.links.filter(l=>l.s!==netEditing&&l.t!==netEditing);
+  save();renderNetLegend();kickNet();netModal.classList.remove('show');toast('삭제됨');};
+document.getElementById('netMCancel').onclick=()=>netModal.classList.remove('show');
+netModal.onclick=e=>{if(e.target===netModal)netModal.classList.remove('show');};
+document.getElementById('netAddPerson').onclick=()=>openNetNode(null);
+document.getElementById('netAddPlace').onclick=()=>{openNetNode(null);setNetType('place');};
+document.getElementById('netTidy').onclick=()=>{db.net.nodes.forEach(n=>{n.x=null;n.y=null;n.vx=0;n.vy=0;});seedPositions();save();kickNet();toast('다시 배치했어요 🧹');};
 
 /* ---- utils ---- */
 function debounce(fn,ms){let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>fn(...a),ms);};}
@@ -623,9 +820,9 @@ let toastT;function toast(msg){const e=document.getElementById('toast');e.textCo
   clearTimeout(toastT);toastT=setTimeout(()=>e.classList.remove('show'),1400);}
 
 /* ---- sync (GitHub private repo) ---- */
-function renderAll(){renderBoard();refreshDay();refreshWeek();renderInsight();}
-function ensureShape(){db.cats=db.cats||DEFAULT_CATS.map(c=>({...c}));db.cards=db.cards||[];db.days=db.days||{};db.weeks=db.weeks||{};db.insights=db.insights||[];}
-function isEmptyData(d){return !(d.cards&&d.cards.length)&&!Object.keys(d.days||{}).length&&!Object.keys(d.weeks||{}).length&&!(d.insights&&d.insights.length);}
+function renderAll(){renderBoard();refreshDay();refreshWeek();renderInsight();netReload();}
+function ensureShape(){db.cats=db.cats||DEFAULT_CATS.map(c=>({...c}));db.cards=db.cards||[];db.days=db.days||{};db.weeks=db.weeks||{};db.insights=db.insights||[];db.net=(db.net&&db.net.nodes)?db.net:defaultNet();db.net.links=db.net.links||[];}
+function isEmptyData(d){return !(d.cards&&d.cards.length)&&!Object.keys(d.days||{}).length&&!Object.keys(d.weeks||{}).length&&!(d.insights&&d.insights.length)&&!(d.net&&d.net.nodes&&d.net.nodes.length);}
 function b64e(str){return btoa(unescape(encodeURIComponent(str)));}
 function b64d(b64){return decodeURIComponent(Array.prototype.map.call(atob(b64.replace(/\s/g,'')),c=>'%'+('00'+c.charCodeAt(0).toString(16)).slice(-2)).join(''));}
 function persistSync(){localStorage.setItem(SYNC_KEY,JSON.stringify(sync));}
@@ -683,7 +880,7 @@ document.addEventListener('visibilitychange',()=>{if(!document.hidden&&sync.toke
 /* ---- theme ---- */
 const root=document.documentElement;
 function setTheme(t){root.setAttribute('data-theme',t);localStorage.setItem('jiwoon_theme',t);
-  themeBtn.textContent=t==='dark'?'☀️':'🌙';}
+  themeBtn.textContent=t==='dark'?'☀️':'🌙';if(netActive)kickNet();}
 themeBtn.onclick=()=>setTheme(root.getAttribute('data-theme')==='dark'?'light':'dark');
 setTheme(localStorage.getItem('jiwoon_theme')|| (matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light'));
 
