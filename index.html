@@ -510,10 +510,10 @@ function renderBoard(){
     if(grouped){
       [...catList(),null].forEach(cat=>{
         const g=list.filter(c=>(c.cat||null)===cat); if(!g.length)return;
-        g.sort((a,b)=>b.pri-a.pri);
         const key=col+'|'+(cat||'_none'), fold=!!collapsed[key], color=cat?catColor(cat):'#9ca3af';
         const hd=document.createElement('div');
         hd.className='grphd'+(fold?' fold':'');
+        hd.dataset.cat=cat||'';
         hd.style.cssText=`background:${hexA(color,.12)};color:${color}`;
         hd.innerHTML=`<span class="gdot" style="background:${color}"></span><span>${cat||'미분류'}</span><span class="gcnt">${g.length}</span><span class="gcar">▾</span>`;
         hd.onclick=()=>{collapsed[key]=!fold;localStorage.setItem('jiwoon_collapsed',JSON.stringify(collapsed));renderBoard();};
@@ -521,7 +521,6 @@ function renderBoard(){
         if(!fold)g.forEach(c=>wrap.appendChild(cardEl(c)));
       });
     } else {
-      list.sort((a,b)=>b.pri-a.pri);
       list.forEach(c=>wrap.appendChild(cardEl(c)));
     }
   });
@@ -544,12 +543,38 @@ function cardEl(c){
 function moveCard(cid,dir){const c=db.cards.find(x=>x.id===cid);if(!c)return;
   let i=Math.max(0,Math.min(2,ORDER.indexOf(c.col)+dir));c.col=ORDER[i];save();renderBoard();
   if(c.col==='done')toast("완료! 👏");}
+function getDragAfter(wrap,y){
+  const els=[...wrap.querySelectorAll('.card:not(.drag)')];
+  let closest={o:-Infinity,el:null};
+  for(const child of els){const b=child.getBoundingClientRect();const o=y-b.top-b.height/2;
+    if(o<0&&o>closest.o)closest={o,el:child};}
+  return closest.el;
+}
+function reorderFromDOM(){
+  const ordered=[];
+  ORDER.forEach(colName=>{
+    const wrap=document.querySelector(`.col[data-col=${colName}] .cards`);if(!wrap)return;
+    let curCat=null;
+    wrap.childNodes.forEach(node=>{
+      if(!node.classList)return;
+      if(node.classList.contains('grphd')){curCat=node.dataset.cat||null;return;}
+      if(node.classList.contains('card')){const c=db.cards.find(x=>x.id===node.dataset.id);if(!c)return;
+        c.col=colName;if(grouped)c.cat=curCat||'';ordered.push(c);}
+    });
+  });
+  const rest=db.cards.filter(c=>!ordered.includes(c));
+  db.cards=ordered.concat(rest);
+}
 document.querySelectorAll('.col').forEach(col=>{
-  col.ondragover=e=>{e.preventDefault();col.classList.add('over');};
-  col.ondragleave=()=>col.classList.remove('over');
+  const wrap=col.querySelector('.cards');
+  col.ondragover=e=>{e.preventDefault();col.classList.add('over');
+    const dragging=document.querySelector('.card.drag');if(!dragging)return;
+    const after=getDragAfter(wrap,e.clientY);
+    if(after==null)wrap.appendChild(dragging);else wrap.insertBefore(dragging,after);};
+  col.ondragleave=e=>{if(e.target===col)col.classList.remove('over');};
   col.ondrop=e=>{e.preventDefault();col.classList.remove('over');
-    const c=db.cards.find(x=>x.id===e.dataTransfer.getData('id'));
-    if(c){c.col=col.dataset.col;save();renderBoard();if(c.col==='done')toast("완료! 👏");}};
+    const c=db.cards.find(x=>x.id===e.dataTransfer.getData('id'));if(!c)return;
+    reorderFromDOM();save();renderBoard();if(c.col==='done')toast("완료! 👏");};
 });
 // quick add with parsing
 function parseAdd(raw,col){
