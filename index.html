@@ -82,7 +82,14 @@
   @keyframes pop{from{opacity:0;transform:scale(.97)}to{opacity:1;transform:none}}
   .card:active{cursor:grabbing}
   .card.urgent{border-left-color:var(--urgent)}
+  .card.top{border-left-color:#dc2626;border-left-width:4px}
   .card.drag{opacity:.35;transform:rotate(1.5deg)}
+  .due{font-size:11px;padding:2px 8px;border-radius:20px;font-weight:800;letter-spacing:-.01em;white-space:nowrap}
+  .due.over{background:rgba(220,38,38,.14);color:#dc2626}
+  .due.today{background:rgba(234,88,12,.15);color:#ea580c}
+  .due.soon{background:rgba(202,138,4,.16);color:#a16207}
+  .due.later{background:var(--surface2);color:var(--sub)}
+  .card.done .due{background:var(--surface2);color:var(--sub)}
   .card .txt{font-size:14px;word-break:break-word;font-weight:500}
   .card.done .txt{text-decoration:line-through;color:var(--sub);font-weight:400}
   .card .meta{display:flex;align-items:center;gap:6px;margin-top:9px;flex-wrap:wrap}
@@ -201,9 +208,9 @@
   <!-- BOARD -->
   <section class="tab active" id="board">
     <div class="focus">
-      <div class="stat urgent"><div class="n" id="sUrgent">0</div><div class="l">🔴 급한 일</div></div>
-      <div class="stat doing"><div class="n" id="sDoing">0</div><div class="l">🔄 진행 중</div></div>
-      <div class="stat done"><div class="n" id="sDone">0</div><div class="l">✅ 완료</div></div>
+      <div class="stat urgent"><div class="n" id="sUrgent">0</div><div class="l">🔴 마감 지남</div></div>
+      <div class="stat doing"><div class="n" id="sDoing">0</div><div class="l">🟠 오늘·내일</div></div>
+      <div class="stat done"><div class="n" id="sDone">0</div><div class="l">📌 최우선</div></div>
     </div>
     <div class="progress"><i id="progFill"></i></div>
     <div class="filters" id="filters"></div>
@@ -211,7 +218,7 @@
       <div class="col todo" data-col="todo">
         <h2><span class="dot"></span>해야 함 <span class="cnt"></span></h2>
         <div class="cards"></div>
-        <div class="quickadd"><input data-add="todo" placeholder="+ 입력 후 Enter  (예: 미팅준비 ❗ #거래처)"></div>
+        <div class="quickadd"><input data-add="todo" placeholder="+ 입력 후 Enter  (예: 미팅준비 !! ~내일 #거래처)"></div>
       </div>
       <div class="col doing" data-col="doing">
         <h2><span class="dot"></span>진행 중 <span class="cnt"></span></h2>
@@ -339,7 +346,16 @@
     <label class="fld">우선순위</label>
     <div class="seg" id="mPriSeg">
       <button data-pri="0" class="on">보통</button>
-      <button data-pri="1">❗ 급함</button>
+      <button data-pri="1">🟠 높음</button>
+      <button data-pri="2">🔴 최우선</button>
+    </div>
+    <label class="fld">마감일</label>
+    <input type="date" id="mDue" style="width:100%">
+    <div class="seg" id="mDueQuick" style="margin-top:8px">
+      <button data-due="0">오늘</button>
+      <button data-due="1">내일</button>
+      <button data-due="7">일주일</button>
+      <button data-due="">없음</button>
     </div>
     <div class="row" style="margin-top:18px">
       <button class="btn" id="mSave">저장</button>
@@ -444,6 +460,7 @@ function hexA(hex,a){const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,
 
 let db = load(), filter = null;
 let grouped = localStorage.getItem('jiwoon_grouped')==='1';
+let dueSort = localStorage.getItem('jiwoon_duesort')!=='0';   // 마감순 자동 정렬 (기본 켬)
 let collapsed = JSON.parse(localStorage.getItem('jiwoon_collapsed')||'{}');
 function load(){ try{ const d=JSON.parse(localStorage.getItem(KEY)); if(!d||!d.cards)return seed();
   if(!d.cats)d.cats=DEFAULT_CATS.map(c=>({...c})); if(!d.net||!d.net.nodes)d.net={nodes:[],links:[]}; return d; }catch(e){ return seed(); } }
@@ -479,6 +496,36 @@ function weekRange(ws){const[y,w]=ws.split("-W").map(Number);
   const sun=new Date(mon);sun.setDate(mon.getDate()+6);
   return `${mon.getMonth()+1}/${mon.getDate()} ~ ${sun.getMonth()+1}/${sun.getDate()}`;}
 
+/* ---- 마감일 · 우선순위 ----
+   정렬 규칙: 마감 지난 것 → 임박한 것 순. 마감이 없어도 우선순위가 높으면 위로 끼어든다
+   (마감은 없지만 중요한 일이 바닥에 깔려 영영 안 보이는 걸 막기 위해). */
+const PRI_LABEL={0:'',1:'🟠',2:'🔴'};
+function daysUntil(due){ if(!due)return null;
+  const[y,m,d]=due.split('-').map(Number); const t=new Date(y,m-1,d); const now=new Date();
+  return Math.round((t-new Date(now.getFullYear(),now.getMonth(),now.getDate()))/86400000); }
+function dueBadge(c){
+  const n=daysUntil(c.due); if(n===null)return '';
+  const[y,m,d]=c.due.split('-').map(Number);
+  let cls='later',txt=`${m}/${d}`;
+  if(n<0){cls='over';txt=`${-n}일 지남`;}
+  else if(n===0){cls='today';txt='오늘';}
+  else if(n===1){cls='soon';txt='내일';}
+  else if(n<=7){cls='soon';txt=`${m}/${d} (${n}일)`;}
+  return `<span class="due ${cls}">${txt}</span>`;
+}
+function sortScore(c){                       // 작을수록 위로
+  const n=daysUntil(c.due);
+  if(n!==null)return n;
+  return c.pri===2?0.5:(c.pri===1?3.5:9999);  // 마감 없음 → 최우선은 '오늘'과 '내일' 사이, 높음은 일주일 안쪽에 끼움
+}
+function sortCards(list){
+  return list.map((c,i)=>({c,i})).sort((a,b)=>{
+    const d=sortScore(a.c)-sortScore(b.c); if(d)return d;
+    const p=(b.c.pri||0)-(a.c.pri||0); if(p)return p;
+    return a.i-b.i;                          // 나머지는 직접 배치한 순서 유지
+  }).map(x=>x.c);
+}
+
 /* ---- tabs ---- */
 function switchTab(name){
   document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('active',x.dataset.tab===name));
@@ -493,25 +540,31 @@ document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>switchTab(b.dat
 /* ---- board ---- */
 function renderBoard(){
   // stats
-  const urgent=db.cards.filter(c=>c.pri&&c.col!=='done').length;
-  const doing=db.cards.filter(c=>c.col==='doing').length;
+  const open=db.cards.filter(c=>c.col!=='done');
+  const over=open.filter(c=>{const n=daysUntil(c.due);return n!==null&&n<0;}).length;
+  const soon=open.filter(c=>{const n=daysUntil(c.due);return n===0||n===1;}).length;
+  const top=open.filter(c=>c.pri===2).length;
   const done=db.cards.filter(c=>c.col==='done').length;
-  sUrgent.textContent=urgent; sDoing.textContent=doing; sDone.textContent=done;
+  sUrgent.textContent=over; sDoing.textContent=soon; sDone.textContent=top;
   const total=db.cards.length; progFill.style.width=total?Math.round(done/total*100)+"%":"0%";
 
   // filters
   const fwrap=document.getElementById('filters');
   fwrap.innerHTML=`<button class="fchip ${!filter?'on':''}" data-f="">전체</button>`+
     catList().map(c=>`<button class="fchip ${filter===c?'on':''}" data-f="${c}" style="${filter===c?`background:${catColor(c)};border-color:${catColor(c)};color:#fff`:''}">${c}</button>`).join('')+
+    `<button class="fchip ${dueSort?'on':''}" id="dueToggle">📅 마감순</button>`+
     `<button class="fchip ${grouped?'on':''}" id="grpToggle">🎨 색깔로 묶기</button>`+
     `<button class="fchip" id="catEdit" style="border-style:dashed">⚙️ 편집</button>`;
   fwrap.querySelectorAll('[data-f]').forEach(b=>b.onclick=()=>{filter=b.dataset.f||null;renderBoard();});
   document.getElementById('catEdit').onclick=openCatModal;
   document.getElementById('grpToggle').onclick=()=>{grouped=!grouped;localStorage.setItem('jiwoon_grouped',grouped?'1':'0');renderBoard();};
+  document.getElementById('dueToggle').onclick=()=>{dueSort=!dueSort;localStorage.setItem('jiwoon_duesort',dueSort?'1':'0');renderBoard();
+    toast(dueSort?'마감 임박한 순으로 정렬해요 📅':'직접 배치한 순서로 둡니다');};
 
   ORDER.forEach(col=>{
     const wrap=document.querySelector(`.col[data-col=${col}] .cards`); wrap.innerHTML='';
     let list=db.cards.filter(c=>c.col===col); if(filter)list=list.filter(c=>c.cat===filter);
+    if(dueSort)list=sortCards(list);
     document.querySelector(`.col[data-col=${col}] .cnt`).textContent=list.length;
     if(grouped){
       [...catList(),null].forEach(cat=>{
@@ -533,11 +586,12 @@ function renderBoard(){
 }
 function cardEl(c){
   const el=document.createElement('div');
-  el.className='card'+(c.col==='done'?' done':'')+(c.pri&&c.col!=='done'?' urgent':'');
+  el.className='card'+(c.col==='done'?' done':'')+(c.pri&&c.col!=='done'?' urgent':'')+(c.pri===2&&c.col!=='done'?' top':'');
   el.draggable=true; el.dataset.id=c.id;
   el.innerHTML=`<div class="txt"></div><div class="meta">
+    ${dueBadge(c)}
     ${c.cat?`<span class="chip" style="background:${hexA(catColor(c.cat),.16)};color:${catColor(c.cat)}">${c.cat}</span>`:''}
-    ${c.pri&&c.col!=='done'?'<span class="pri">❗</span>':''}
+    ${c.pri&&c.col!=='done'?`<span class="pri">${PRI_LABEL[c.pri]||''}</span>`:''}
     <span class="move"><button data-mv="-1">◀</button><button data-mv="1">▶</button></span></div>`;
   el.querySelector('.txt').textContent=c.text;
   el.querySelector('.txt').onclick=()=>openCard(c.id);
@@ -580,15 +634,30 @@ document.querySelectorAll('.col').forEach(col=>{
   col.ondragleave=e=>{if(e.target===col)col.classList.remove('over');};
   col.ondrop=e=>{e.preventDefault();col.classList.remove('over');
     const c=db.cards.find(x=>x.id===e.dataTransfer.getData('id'));if(!c)return;
-    reorderFromDOM();touch(c);save();renderBoard();if(c.col==='done')toast("완료! 👏");};
+    const prevCol=c.col;
+    reorderFromDOM();touch(c);save();renderBoard();
+    if(c.col==='done')toast("완료! 👏");
+    else if(dueSort&&prevCol===c.col)toast("📅 마감순 정렬 중 — 순서는 자동으로 잡혀요");};
 });
 // quick add with parsing
 function parseAdd(raw,col){
-  let pri=0,cat="";
-  if(raw.includes("❗")){pri=1;raw=raw.replace(/❗/g,"");}
+  let pri=0,cat="",due="";
+  // 우선순위: ❗❗ 또는 !! = 최우선, ❗ 또는 ! = 높음
+  if(/❗❗|!!/.test(raw)){pri=2;raw=raw.replace(/❗❗|!!/g,"");}
+  else if(/❗|!/.test(raw)){pri=1;raw=raw.replace(/❗|!/g,"");}
+  // 마감: ~오늘 ~내일 ~8/12
+  const dm=raw.match(/~\s*(오늘|내일|모레|(\d{1,2})\/(\d{1,2}))/);
+  if(dm){
+    const d=new Date();
+    if(dm[1]==='내일')d.setDate(d.getDate()+1);
+    else if(dm[1]==='모레')d.setDate(d.getDate()+2);
+    else if(dm[2]){d.setMonth(+dm[2]-1);d.setDate(+dm[3]);
+      if(daysUntil(ymd(d))<-180)d.setFullYear(d.getFullYear()+1);}   // 12월에 "1/5" 치면 내년
+    due=ymd(d); raw=raw.replace(dm[0],"");
+  }
   const m=raw.match(/#(\S+)/); if(m){const t=m[1];if(catList().includes(t)){cat=t;raw=raw.replace(m[0],"");}}
   const text=raw.trim(); if(!text)return;
-  db.cards.push({id:nid(),text,cat,pri,col,u:ts()});save();renderBoard();
+  db.cards.push({id:nid(),text,cat,pri,due,col,u:ts()});save();renderBoard();
 }
 document.querySelectorAll('.quickadd input').forEach(inp=>{
   inp.onkeydown=e=>{if(e.key==='Enter'&&inp.value.trim()){parseAdd(inp.value,inp.dataset.add);inp.value='';}};
@@ -603,17 +672,22 @@ function renderSegs(){
   cs.querySelectorAll('button').forEach(b=>b.onclick=()=>{mCat=b.dataset.c;renderSegs();});
   document.querySelectorAll('#mPriSeg button').forEach(b=>{b.classList.toggle('on',+b.dataset.pri===mPri);
     b.onclick=()=>{mPri=+b.dataset.pri;document.querySelectorAll('#mPriSeg button').forEach(x=>x.classList.toggle('on',x===b));};});
+  document.querySelectorAll('#mDueQuick button').forEach(b=>{b.onclick=()=>{
+    const v=b.dataset.due;
+    if(v===''){mDue.value='';return;}
+    const d=new Date();d.setDate(d.getDate()+ +v);mDue.value=ymd(d);};});
 }
 function openCard(cid,col){
   editing=cid;addCol=col;
   if(cid){const c=db.cards.find(x=>x.id===cid);modalTitle.textContent='할 일 수정';
-    mText.value=c.text;mCat=c.cat||'';mPri=c.pri||0;mDel.style.display='';}
-  else{modalTitle.textContent='새 할 일';mText.value='';mCat='';mPri=0;mDel.style.display='none';}
+    mText.value=c.text;mCat=c.cat||'';mPri=c.pri||0;mDue.value=c.due||'';mDel.style.display='';}
+  else{modalTitle.textContent='새 할 일';mText.value='';mCat='';mPri=0;mDue.value='';mDel.style.display='none';}
   renderSegs();cardModal.classList.add('show');setTimeout(()=>mText.focus(),100);
 }
 mSave.onclick=()=>{const t=mText.value.trim();if(!t){cardModal.classList.remove('show');return;}
-  if(editing){const c=db.cards.find(x=>x.id===editing);c.text=t;c.cat=mCat;c.pri=mPri;touch(c);}
-  else db.cards.push({id:nid(),text:t,cat:mCat,pri:mPri,col:addCol||'todo',u:ts()});
+  const due=mDue.value||'';
+  if(editing){const c=db.cards.find(x=>x.id===editing);c.text=t;c.cat=mCat;c.pri=mPri;c.due=due;touch(c);}
+  else db.cards.push({id:nid(),text:t,cat:mCat,pri:mPri,due,col:addCol||'todo',u:ts()});
   save();renderBoard();cardModal.classList.remove('show');toast("저장됨 ✓");};
 mDel.onclick=()=>{bury('cards',editing);db.cards=db.cards.filter(x=>x.id!==editing);save();renderBoard();cardModal.classList.remove('show');toast("삭제됨");};
 mCancel.onclick=()=>cardModal.classList.remove('show');
@@ -710,7 +784,11 @@ insightSave.onclick=()=>{const v=insightPaste.value.trim();if(!v)return;
 function renderMd(){mdOut.textContent=toMd();}
 function toMd(){let s="# 🗂️ 업무 보드\n\n";
   ORDER.forEach(col=>{s+=`## ${COL_NAME[col]}\n`;
-    db.cards.filter(c=>c.col===col).forEach(c=>s+=`- [${col==='done'?'x':' '}] ${c.pri?'❗ ':''}${c.text}${c.cat?' #'+c.cat:''}\n`);s+="\n";});
+    sortCards(db.cards.filter(c=>c.col===col)).forEach(c=>{
+      const n=daysUntil(c.due);
+      const dtxt=c.due?` (마감 ${c.due}${n<0?` · ${-n}일 지남`:n===0?' · 오늘':''})`:'';
+      s+=`- [${col==='done'?'x':' '}] ${c.pri===2?'🔴 ':c.pri===1?'🟠 ':''}${c.text}${dtxt}${c.cat?' #'+c.cat:''}\n`;});
+    s+="\n";});
   const dys=Object.keys(db.days).filter(d=>db.days[d].retro||db.days[d].idea).sort().reverse();
   if(dys.length){s+="# 📅 일일 기록\n\n";dys.forEach(d=>{const o=db.days[d];
     s+=`## ${d}\n**회고:** ${o.retro||'-'}\n\n**아이디어:** ${o.idea||'-'}\n\n`;});}
