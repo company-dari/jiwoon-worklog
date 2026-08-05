@@ -186,6 +186,7 @@
     <button class="icobtn" id="themeBtn" title="테마">🌙</button>
   </div>
 </header>
+<div id="syncBar" style="display:none;cursor:pointer;background:#fef3c7;color:#92400e;border-bottom:1px solid #fcd34d;padding:9px 14px;font-size:13px;font-weight:700;text-align:center"></div>
 
 <nav class="top">
   <button data-tab="board" class="active">🗂️ 보드</button>
@@ -445,16 +446,21 @@ let db = load(), filter = null;
 let grouped = localStorage.getItem('jiwoon_grouped')==='1';
 let collapsed = JSON.parse(localStorage.getItem('jiwoon_collapsed')||'{}');
 function load(){ try{ const d=JSON.parse(localStorage.getItem(KEY)); if(!d||!d.cards)return seed();
-  if(!d.cats)d.cats=DEFAULT_CATS.map(c=>({...c})); if(!d.net||!d.net.nodes)d.net=defaultNet(); return d; }catch(e){ return seed(); } }
-function seed(){ return { cats:DEFAULT_CATS.map(c=>({...c})), cards:[
-  {id:nid(),text:"거래처 미팅 자료 준비",cat:"거래처",pri:1,col:"todo"},
-  {id:nid(),text:"원가 계산서 검토",cat:"재무",pri:0,col:"todo"},
-  {id:nid(),text:"인스타 콘텐츠 업로드",cat:"마케팅",pri:0,col:"todo"},
-  {id:nid(),text:"업무일지 시스템 세팅",cat:"개인",pri:0,col:"doing"},
-], days:{}, weeks:{}, ideas:["주간 회고를 mati.a가 자동 요약"], net:defaultNet() }; }
+  if(!d.cats)d.cats=DEFAULT_CATS.map(c=>({...c})); if(!d.net||!d.net.nodes)d.net={nodes:[],links:[]}; return d; }catch(e){ return seed(); } }
+function seed(){ return { cats:DEFAULT_CATS.map(c=>({...c})), cards:[],
+  days:{}, weeks:{}, insights:[], net:{nodes:[],links:[]}, tomb:{} }; }
 let pulling=false;
-function save(){ localStorage.setItem(KEY, JSON.stringify(db)); if(sync.token&&!pulling)schedulePush(); }
+function save(){ localStorage.setItem(KEY, JSON.stringify(db));
+  if(sync.token&&!pulling){ sync.dirty=true; persistSync(); schedulePush(); } }
 function nid(){ return "c"+(performance.now()|0)+"_"+(++_n); }
+
+/* ---- 동기화용: 수정시각 도장 · 삭제 기록(무덤) ----
+   기기마다 따로 고친 걸 항목 단위로 합치기 위해, 바뀐 항목엔 u=고친시각을 찍고
+   지운 항목은 tomb에 지운시각을 남긴다(그래야 다른 기기에서 되살아나지 않음). */
+function ts(){ return Date.now(); }
+function touch(o){ if(o) o.u=ts(); return o; }
+function bury(kind,key){ db.tomb=db.tomb||{}; (db.tomb[kind]=db.tomb[kind]||{})[key]=ts(); }
+function linkKey(l){ return [l.s,l.t].sort().join('|'); }
 
 /* ---- date helpers ---- */
 function p(n){return String(n).padStart(2,"0");}
@@ -541,7 +547,7 @@ function cardEl(c){
   return el;
 }
 function moveCard(cid,dir){const c=db.cards.find(x=>x.id===cid);if(!c)return;
-  let i=Math.max(0,Math.min(2,ORDER.indexOf(c.col)+dir));c.col=ORDER[i];save();renderBoard();
+  let i=Math.max(0,Math.min(2,ORDER.indexOf(c.col)+dir));c.col=ORDER[i];touch(c);save();renderBoard();
   if(c.col==='done')toast("완료! 👏");}
 function getDragAfter(wrap,y){
   const els=[...wrap.querySelectorAll('.card:not(.drag)')];
@@ -574,7 +580,7 @@ document.querySelectorAll('.col').forEach(col=>{
   col.ondragleave=e=>{if(e.target===col)col.classList.remove('over');};
   col.ondrop=e=>{e.preventDefault();col.classList.remove('over');
     const c=db.cards.find(x=>x.id===e.dataTransfer.getData('id'));if(!c)return;
-    reorderFromDOM();save();renderBoard();if(c.col==='done')toast("완료! 👏");};
+    reorderFromDOM();touch(c);save();renderBoard();if(c.col==='done')toast("완료! 👏");};
 });
 // quick add with parsing
 function parseAdd(raw,col){
@@ -582,7 +588,7 @@ function parseAdd(raw,col){
   if(raw.includes("❗")){pri=1;raw=raw.replace(/❗/g,"");}
   const m=raw.match(/#(\S+)/); if(m){const t=m[1];if(catList().includes(t)){cat=t;raw=raw.replace(m[0],"");}}
   const text=raw.trim(); if(!text)return;
-  db.cards.push({id:nid(),text,cat,pri,col});save();renderBoard();
+  db.cards.push({id:nid(),text,cat,pri,col,u:ts()});save();renderBoard();
 }
 document.querySelectorAll('.quickadd input').forEach(inp=>{
   inp.onkeydown=e=>{if(e.key==='Enter'&&inp.value.trim()){parseAdd(inp.value,inp.dataset.add);inp.value='';}};
@@ -606,10 +612,10 @@ function openCard(cid,col){
   renderSegs();cardModal.classList.add('show');setTimeout(()=>mText.focus(),100);
 }
 mSave.onclick=()=>{const t=mText.value.trim();if(!t){cardModal.classList.remove('show');return;}
-  if(editing){const c=db.cards.find(x=>x.id===editing);c.text=t;c.cat=mCat;c.pri=mPri;}
-  else db.cards.push({id:nid(),text:t,cat:mCat,pri:mPri,col:addCol||'todo'});
+  if(editing){const c=db.cards.find(x=>x.id===editing);c.text=t;c.cat=mCat;c.pri=mPri;touch(c);}
+  else db.cards.push({id:nid(),text:t,cat:mCat,pri:mPri,col:addCol||'todo',u:ts()});
   save();renderBoard();cardModal.classList.remove('show');toast("저장됨 ✓");};
-mDel.onclick=()=>{db.cards=db.cards.filter(x=>x.id!==editing);save();renderBoard();cardModal.classList.remove('show');toast("삭제됨");};
+mDel.onclick=()=>{bury('cards',editing);db.cards=db.cards.filter(x=>x.id!==editing);save();renderBoard();cardModal.classList.remove('show');toast("삭제됨");};
 mCancel.onclick=()=>cardModal.classList.remove('show');
 cardModal.onclick=e=>{if(e.target===cardModal)cardModal.classList.remove('show');};
 document.getElementById('fab').onclick=()=>{switchTab('board');openCard(null,'todo');};
@@ -641,7 +647,7 @@ document.getElementById('catSave').onclick=()=>{
   db.cards.forEach(card=>{if(!card.cat)return;
     const r=clean.find(c=>c.orig===card.cat);
     if(r)card.cat=r.name; else if(!names.includes(card.cat))card.cat='';});
-  db.cats=clean.map(c=>({name:c.name,color:c.color}));
+  db.cats=clean.map(c=>({name:c.name,color:c.color}));db.catsU=ts();
   if(filter&&!names.includes(filter))filter=null;
   save();renderBoard();catModal.classList.remove('show');toast('카테고리 저장됨 ✓');};
 document.getElementById('catCancel').onclick=()=>catModal.classList.remove('show');
@@ -651,7 +657,7 @@ catModal.onclick=e=>{if(e.target===catModal)catModal.classList.remove('show');};
 let curDay=new Date();
 function refreshDay(){const s=ymd(curDay);dCur.textContent=fmtDay(s);
   const o=db.days[s]||{};retro.value=o.retro||'';dayIdea.value=o.idea||'';}
-function saveDay(){const s=ymd(curDay);db.days[s]={retro:retro.value,idea:dayIdea.value};save();}
+function saveDay(){const s=ymd(curDay);db.days[s]={retro:retro.value,idea:dayIdea.value,u:ts()};save();}
 dPrev.onclick=()=>{curDay.setDate(curDay.getDate()-1);refreshDay();};
 dNext.onclick=()=>{curDay.setDate(curDay.getDate()+1);refreshDay();};
 dToday.onclick=()=>{curDay=new Date();refreshDay();};
@@ -661,7 +667,7 @@ dToday.onclick=()=>{curDay=new Date();refreshDay();};
 let curWeek=new Date();
 function refreshWeek(){const ws=isoWeek(curWeek);wCur.textContent=weekRange(ws);
   const o=db.weeks[ws]||{};wGood.value=o.good||'';wBad.value=o.bad||'';wLearn.value=o.learn||'';wNext_.value=o.next||'';}
-function saveWeek(){const ws=isoWeek(curWeek);db.weeks[ws]={good:wGood.value,bad:wBad.value,learn:wLearn.value,next:wNext_.value};save();}
+function saveWeek(){const ws=isoWeek(curWeek);db.weeks[ws]={good:wGood.value,bad:wBad.value,learn:wLearn.value,next:wNext_.value,u:ts()};save();}
 wPrev.onclick=()=>{curWeek.setDate(curWeek.getDate()-7);refreshWeek();};
 wNext.onclick=()=>{curWeek.setDate(curWeek.getDate()+7);refreshWeek();};
 wThis.onclick=()=>{curWeek=new Date();refreshWeek();};
@@ -682,7 +688,7 @@ function renderInsight(){
     const head=document.createElement('div');head.style.cssText='display:flex;align-items:center;gap:8px;margin-bottom:6px';
     head.innerHTML=`<b style="font-size:13px">✨ ${it.when}</b>`;
     const del=document.createElement('button');del.className='icobtn';del.textContent='🗑️';del.style.cssText='margin-left:auto;width:30px;height:28px;font-size:13px';
-    del.onclick=()=>{db.insights.splice(i,1);save();renderInsight();};
+    del.onclick=()=>{if(it.id)bury('insights',it.id);db.insights.splice(i,1);save();renderInsight();};
     head.appendChild(del);
     const body=document.createElement('div');body.style.cssText='font-size:13.5px;white-space:pre-wrap;word-break:break-word';
     body.textContent=it.text;
@@ -698,7 +704,7 @@ function aiPrompt(){
 copyForAI.onclick=()=>navigator.clipboard.writeText(aiPrompt()).then(()=>toast("복사됨 — AI에게 붙여넣으세요 🤖"));
 insightSave.onclick=()=>{const v=insightPaste.value.trim();if(!v)return;
   const now=new Date();const stamp=`${now.getMonth()+1}/${now.getDate()}`;
-  db.insights.unshift({when:stamp,text:v});insightPaste.value='';save();renderInsight();toast("인사이트 저장됨 ✨");};
+  db.insights.unshift({id:nid(),when:stamp,text:v,u:ts()});insightPaste.value='';save();renderInsight();toast("인사이트 저장됨 ✨");};
 
 /* ---- export ---- */
 function renderMd(){mdOut.textContent=toMd();}
@@ -732,15 +738,7 @@ const PLACE_PAL=["#8b5cf6","#f97316","#0ea5e9","#16a34a","#ec4899","#eab308","#1
 let netCanvas,netCtx,netRAF=null,netActive=false,netDPR=1,netBound=false;
 let netDrag=null,netDownPos=null,netMoved=false,netEnergy=1,netEditing=null,netMType='person';
 let netView={k:1,x:0,y:0};
-function defaultNet(){
-  const N=(name,type)=>({id:nid(),name,type});
-  const sb=N('스타브리드','place'),js=N('자스 카페','place'),bk=N('수요 독서모임','place');
-  const kim=N('김코치','person'),minji=N('민지','person'),sh=N('상현','person'),yerin=N('예린','person'),teo=N('태오','person');
-  const L=(a,b,label)=>({s:a.id,t:b.id,label:label||''});
-  return {nodes:[sb,js,bk,kim,minji,sh,yerin,teo],
-    links:[L(sb,kim,'PT 코치'),L(sb,minji),L(sb,sh),L(sb,yerin),L(minji,js,'단골'),L(sh,js),L(yerin,bk),L(teo,bk),L(kim,sh,'친구')]};
-}
-function netShape(){ if(!db.net||!db.net.nodes)db.net=defaultNet(); db.net.links=db.net.links||[]; }
+function netShape(){ if(!db.net||!db.net.nodes)db.net={nodes:[],links:[]}; db.net.links=db.net.links||[]; }
 function nodeById(id){return db.net.nodes.find(n=>n.id===id);}
 function escapeHtml(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 function getCSS(v){return getComputedStyle(document.documentElement).getPropertyValue(v).trim()||'#333';}
@@ -849,7 +847,7 @@ function bindNet(){ if(netBound)return;netBound=true;
     if(netDrag){if(Math.hypot(s.x-netDownPos.x,s.y-netDownPos.y)>4)netMoved=true;const w=toWorld(s);netDrag.x=w.x-netDrag._ox;netDrag.y=w.y-netDrag._oy;netDrag.vx=0;netDrag.vy=0;kickNet();return;}
     if(panStart){netView.x=panStart.vx+(s.x-panStart.x);netView.y=panStart.vy+(s.y-panStart.y);drawNet();}});
   const end=e=>{ptrs.delete(e.pointerId);if(ptrs.size<2)pinch=null;
-    if(netDrag&&ptrs.size===0){const wasClick=!netMoved,n=netDrag;netDrag=null;if(wasClick)openNetNode(n.id);else save();kickNet();}
+    if(netDrag&&ptrs.size===0){const wasClick=!netMoved,n=netDrag;netDrag=null;if(wasClick)openNetNode(n.id);else{touch(n);save();}kickNet();}
     if(ptrs.size===0)panStart=null;};
   netCanvas.addEventListener('pointerup',end);netCanvas.addEventListener('pointercancel',end);
   netCanvas.addEventListener('wheel',e=>{e.preventDefault();const s=screenPos(e);
@@ -889,30 +887,32 @@ function renderNetConns(){const wrap=document.getElementById('netConns'),sel=doc
   const conns=db.net.links.filter(l=>l.s===netEditing||l.t===netEditing);
   wrap.innerHTML=conns.length?conns.map((l,idx)=>{const o=nodeById(l.s===netEditing?l.t:l.s);
     return `<div class="connrow"><span class="cn">${o&&o.type==='place'?'📍':'🙂'} ${escapeHtml(o?o.name:'?')}</span><input type="text" class="clbl" data-lk="${idx}" value="${escapeHtml(l.label||'')}" placeholder="관계 메모"><button data-rm="${idx}" title="연결 끊기">✕</button></div>`;}).join(''):'<div class="hint">아직 연결이 없어요. 아래에서 추가해요.</div>';
-  wrap.querySelectorAll('.clbl').forEach(inp=>inp.onchange=()=>{const list=db.net.links.filter(l=>l.s===netEditing||l.t===netEditing),c=list[+inp.dataset.lk];if(c){c.label=inp.value.trim();save();kickNet();}});
+  wrap.querySelectorAll('.clbl').forEach(inp=>inp.onchange=()=>{const list=db.net.links.filter(l=>l.s===netEditing||l.t===netEditing),c=list[+inp.dataset.lk];if(c){c.label=inp.value.trim();touch(c);save();kickNet();}});
   wrap.querySelectorAll('[data-rm]').forEach(b=>b.onclick=()=>{const list=db.net.links.filter(l=>l.s===netEditing||l.t===netEditing),c=list[+b.dataset.rm];
-    db.net.links=db.net.links.filter(l=>l!==c);save();renderNetConns();renderNetLegend();kickNet();});
+    if(c)bury('links',linkKey(c));db.net.links=db.net.links.filter(l=>l!==c);save();renderNetConns();renderNetLegend();kickNet();});
   const others=db.net.nodes.filter(n=>n.id!==netEditing);
   sel.innerHTML='<option value="">+ 연결할 대상…</option>'+others.map(n=>`<option value="${n.id}">${n.type==='place'?'📍':'🙂'} ${escapeHtml(n.name)}</option>`).join('');}
 document.getElementById('netConnAdd').onclick=()=>{const sel=document.getElementById('netConnSel'),tid=sel.value,lblEl=document.getElementById('netConnLabel'),label=lblEl?lblEl.value.trim():'';if(!tid||!netEditing)return;
   if(db.net.links.some(l=>(l.s===netEditing&&l.t===tid)||(l.t===netEditing&&l.s===tid))){toast('이미 연결돼 있어요');return;}
-  db.net.links.push({s:netEditing,t:tid,label});if(lblEl)lblEl.value='';save();renderNetConns();renderNetLegend();kickNet();toast('연결됨 🔗');};
+  db.net.links.push({s:netEditing,t:tid,label,u:ts()});if(lblEl)lblEl.value='';save();renderNetConns();renderNetLegend();kickNet();toast('연결됨 🔗');};
 function readNetFields(n){n.phone=document.getElementById('netMPhone').value.trim();
   n.insta=instaHandle(document.getElementById('netMInsta').value);
   n.memo=document.getElementById('netMMemo').value.trim();}
 document.getElementById('netMSave').onclick=()=>{const name=document.getElementById('netMName').value.trim();if(!name){netModal.classList.remove('show');return;}
-  if(netEditing){const n=nodeById(netEditing);n.name=name;n.type=netMType;readNetFields(n);}
-  else{const d=netDims(),n={id:nid(),name,type:netMType,x:d.w/2+(Math.random()*50-25),y:d.h/2+(Math.random()*50-25),vx:0,vy:0};readNetFields(n);db.net.nodes.push(n);netEditing=n.id;
+  if(netEditing){const n=nodeById(netEditing);n.name=name;n.type=netMType;readNetFields(n);touch(n);}
+  else{const d=netDims(),n={id:nid(),name,type:netMType,x:d.w/2+(Math.random()*50-25),y:d.h/2+(Math.random()*50-25),vx:0,vy:0,u:ts()};readNetFields(n);db.net.nodes.push(n);netEditing=n.id;
     document.getElementById('netMTitle').textContent='수정';document.getElementById('netMDel').style.display='';}
   save();renderNetConns();renderNetLegend();kickNet();toast('저장됨 ✓');};
 document.getElementById('netMDel').onclick=()=>{if(!netEditing)return;
+  bury('nodes',netEditing);
+  db.net.links.filter(l=>l.s===netEditing||l.t===netEditing).forEach(l=>bury('links',linkKey(l)));
   db.net.nodes=db.net.nodes.filter(n=>n.id!==netEditing);db.net.links=db.net.links.filter(l=>l.s!==netEditing&&l.t!==netEditing);
   save();renderNetLegend();kickNet();netModal.classList.remove('show');toast('삭제됨');};
 document.getElementById('netMCancel').onclick=()=>netModal.classList.remove('show');
 netModal.onclick=e=>{if(e.target===netModal)netModal.classList.remove('show');};
 document.getElementById('netAddPerson').onclick=()=>openNetNode(null);
 document.getElementById('netAddPlace').onclick=()=>{openNetNode(null);setNetType('place');};
-document.getElementById('netTidy').onclick=()=>{db.net.nodes.forEach(n=>{n.x=null;n.y=null;n.vx=0;n.vy=0;});netView={k:1,x:0,y:0};seedPositions();save();netFit();kickNet();toast('다시 배치했어요 🧹');};
+document.getElementById('netTidy').onclick=()=>{db.net.nodes.forEach(n=>{n.x=null;n.y=null;n.vx=0;n.vy=0;touch(n);});netView={k:1,x:0,y:0};seedPositions();save();netFit();kickNet();toast('다시 배치했어요 🧹');};
 
 /* ---- utils ---- */
 function debounce(fn,ms){let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>fn(...a),ms);};}
@@ -921,8 +921,54 @@ let toastT;function toast(msg){const e=document.getElementById('toast');e.textCo
 
 /* ---- sync (GitHub private repo) ---- */
 function renderAll(){renderBoard();refreshDay();refreshWeek();renderInsight();netReload();}
-function ensureShape(){db.cats=db.cats||DEFAULT_CATS.map(c=>({...c}));db.cards=db.cards||[];db.days=db.days||{};db.weeks=db.weeks||{};db.insights=db.insights||[];db.net=(db.net&&db.net.nodes)?db.net:defaultNet();db.net.links=db.net.links||[];}
-function isEmptyData(d){return !(d.cards&&d.cards.length)&&!Object.keys(d.days||{}).length&&!Object.keys(d.weeks||{}).length&&!(d.insights&&d.insights.length)&&!(d.net&&d.net.nodes&&d.net.nodes.length);}
+const TOMB_KINDS=['cards','nodes','links','insights','days','weeks'];
+function ensureShape(){db.cats=db.cats||DEFAULT_CATS.map(c=>({...c}));db.cards=db.cards||[];db.days=db.days||{};db.weeks=db.weeks||{};db.insights=db.insights||[];
+  db.net=(db.net&&db.net.nodes)?db.net:{nodes:[],links:[]};db.net.links=db.net.links||[];
+  db.tomb=db.tomb||{};TOMB_KINDS.forEach(k=>db.tomb[k]=db.tomb[k]||{});
+  const cut=Date.now()-180*86400000;                                  // 반년 지난 삭제기록은 정리(파일 계속 커지는 것 방지)
+  TOMB_KINDS.forEach(k=>Object.keys(db.tomb[k]).forEach(id=>{if(db.tomb[k][id]<cut)delete db.tomb[k][id];}));
+  db.insights.forEach(it=>{if(!it.id)it.id=nid();});}
+
+/* ---- 병합 엔진 ----
+   예전엔 "나중에 저장한 기기가 통째로 덮어쓰기"였다. 폰에서 적고 맥에서 적으면 한쪽이 사라졌다.
+   이제는 항목마다 u(고친시각)를 비교해 최신 것만 남기고, tomb(지운시각)이 더 나중이면 버린다. */
+function mergeArr(loc,rem,tombMap,keyOf){
+  const m=new Map();
+  const put=it=>{if(!it)return;const k=keyOf(it);const p=m.get(k);if(!p||(it.u||0)>=(p.u||0))m.set(k,it);};
+  (loc||[]).forEach(put);(rem||[]).forEach(put);
+  const out=[];m.forEach((it,k)=>{ if((tombMap[k]||0)>=(it.u||0))return; out.push(it); });
+  return out;
+}
+function mergeObj(loc,rem,tombMap){
+  const out={},keys=new Set([...Object.keys(loc||{}),...Object.keys(rem||{})]);
+  keys.forEach(k=>{const a=(loc||{})[k],b=(rem||{})[k];
+    const pick=!a?b:(!b?a:(((b.u||0)>=(a.u||0))?b:a));
+    if(pick&&!((tombMap[k]||0)>=(pick.u||0)))out[k]=pick;});
+  return out;
+}
+function mergeTomb(a,b){const out={};TOMB_KINDS.forEach(kind=>{const x=(a||{})[kind]||{},y=(b||{})[kind]||{},o={};
+  new Set([...Object.keys(x),...Object.keys(y)]).forEach(k=>o[k]=Math.max(x[k]||0,y[k]||0));out[kind]=o;});return out;}
+function mergeInto(remote){
+  if(!remote||typeof remote!=='object')return;
+  ensureShape();
+  const tomb=mergeTomb(db.tomb,remote.tomb);db.tomb=tomb;
+  db.cards=mergeArr(db.cards,remote.cards,tomb.cards,c=>c.id);
+  db.insights=mergeArr(db.insights,remote.insights,tomb.insights,i=>i.id||(i.when+'|'+(i.text||'').slice(0,24)));
+  db.days=mergeObj(db.days,remote.days,tomb.days);
+  db.weeks=mergeObj(db.weeks,remote.weeks,tomb.weeks);
+  const rnet=remote.net||{nodes:[],links:[]};
+  db.net.nodes=mergeArr(db.net.nodes,rnet.nodes,tomb.nodes,n=>n.id);
+  db.net.links=mergeArr(db.net.links,rnet.links,tomb.links,linkKey);
+  const alive=new Set(db.net.nodes.map(n=>n.id));                 // 사라진 인물에 매달린 연결선 정리
+  db.net.links=db.net.links.filter(l=>alive.has(l.s)&&alive.has(l.t));
+  if((remote.catsU||0)>(db.catsU||0)&&remote.cats&&remote.cats.length){db.cats=remote.cats;db.catsU=remote.catsU;}
+  ensureShape();
+}
+/* 올릴 때는 화면 계산용 임시값(_로 시작, 속도 vx/vy)을 빼고 좌표는 정수로 — 안 그러면 가만히 둬도 계속 달라져 보인다 */
+function cleanNode(n){const o={};Object.keys(n).forEach(k=>{if(k[0]==='_'||k==='vx'||k==='vy')return;o[k]=n[k];});
+  if(typeof o.x==='number')o.x=Math.round(o.x); if(typeof o.y==='number')o.y=Math.round(o.y); return o;}
+function snapshot(){return {...db,net:{nodes:db.net.nodes.map(cleanNode),links:db.net.links}};}
+function canon(o){return JSON.stringify(o,(k,v)=>{if(v&&typeof v==='object'&&!Array.isArray(v)){const s={};Object.keys(v).sort().forEach(kk=>s[kk]=v[kk]);return s;}return v;});}
 function b64e(str){return btoa(unescape(encodeURIComponent(str)));}
 function b64d(b64){return decodeURIComponent(Array.prototype.map.call(atob(b64.replace(/\s/g,'')),c=>'%'+('00'+c.charCodeAt(0).toString(16)).slice(-2)).join(''));}
 function persistSync(){localStorage.setItem(SYNC_KEY,JSON.stringify(sync));}
@@ -931,51 +977,73 @@ async function ghReq(method,body){
     method,headers:{Authorization:`Bearer ${sync.token}`,Accept:'application/vnd.github+json'},
     body:body?JSON.stringify(body):undefined});
 }
+function fmtAgo(t){if(!t)return '아직 없음';const s=Math.round((Date.now()-t)/1000);
+  if(s<60)return '방금';if(s<3600)return Math.floor(s/60)+'분 전';if(s<86400)return Math.floor(s/3600)+'시간 전';return Math.floor(s/86400)+'일 전';}
 function syncState(s,info){
-  const map={off:['☁️','연결 안 됨'],sync:['🔄','동기화 중…'],ok:['✅','연결됨 · 방금 동기화'],err:['⚠️','오류: '+(info||'')]};
+  const map={off:['☁️','연결 안 됨'],sync:['🔄','동기화 중…'],ok:['✅','연결됨 · 마지막 '+fmtAgo(sync.last)],
+             err:['⚠️','안 올라감: '+(info||'')+' · 이 기기에는 저장돼 있어요'],
+             wait:['🕗','기다리는 중 (인터넷 오면 자동으로 올라감)']};
   const[ic,txt]=map[s]||map.off; syncBtn.textContent=ic;
   const el=document.getElementById('syncState'); if(el)el.textContent='상태: '+txt;
+  const bar=document.getElementById('syncBar');
+  if(bar){ const bad=(s==='err'||s==='wait');
+    bar.style.display=bad?'block':'none';
+    bar.textContent=(s==='wait'?'🕗 아직 서버에 못 올렸어요 — 인터넷 연결되면 자동으로 올라갑니다':'⚠️ 동기화가 멈췄어요 ('+(info||'')+') — 눌러서 확인');
+  }
 }
-const schedulePush=debounce(()=>push(),1200);
-async function push(){ if(!sync.token)return; syncState('sync');
+const schedulePush=debounce(()=>syncNow(),1200);
+/* 핵심: 무조건 덮어쓰지 않는다. 서버 것을 읽어 → 항목 단위로 합치고 → 달라진 게 있을 때만 올린다. */
+let syncing=false;
+async function syncNow(tries){
+  tries=tries||0;
+  if(!sync.token)return false;
+  if(syncing&&!tries)return false;
+  syncing=true; if(!tries)syncState('sync');
   try{
-    let body={message:'update '+new Date().toISOString(),content:b64e(JSON.stringify(db)),sha:sync.sha};
-    let r=await ghReq('PUT',body);
-    if(r.status===409||r.status===422){ await pull(); body.sha=sync.sha; body.content=b64e(JSON.stringify(db)); r=await ghReq('PUT',body); }
-    if(r.ok){const j=await r.json();sync.sha=j.content.sha;sync.last=Date.now();persistSync();syncState('ok');}
-    else syncState('err',r.status);
-  }catch(e){syncState('err','네트워크');}
-}
-async function pull(){ if(!sync.token)return false; syncState('sync');
-  try{
-    const r=await ghReq('GET'); if(!r.ok){syncState('err',r.status);return false;}
-    const j=await r.json(); sync.sha=j.sha;
-    const remote=JSON.parse(b64d(j.content));
-    pulling=true; db=remote; ensureShape(); localStorage.setItem(KEY,JSON.stringify(db)); renderAll(); pulling=false;
-    sync.last=Date.now(); persistSync(); syncState('ok'); return true;
-  }catch(e){pulling=false;syncState('err','읽기');return false;}
+    const g=await ghReq('GET');
+    if(g.status===401||g.status===403){syncing=false;syncState('err','토큰 권한 없음/만료');return false;}
+    let remote=null;
+    if(g.ok){ const j=await g.json(); sync.sha=j.sha; try{remote=JSON.parse(b64d(j.content));}catch(_){remote=null;} }
+    else if(g.status===404){ sync.sha=null; }                          // 파일이 아직 없음 → 새로 만든다
+    else { syncing=false;syncState('err','서버 '+g.status);return false; }
+
+    const before=canon(snapshot());
+    if(remote){ pulling=true; mergeInto(remote); pulling=false; }
+    ensureShape();
+    const merged=snapshot(), mine=canon(merged);
+    if(mine!==before){ localStorage.setItem(KEY,JSON.stringify(db)); renderAll(); }
+
+    if(!remote || mine!==canon(remote)){
+      const body={message:'update '+new Date().toISOString(),content:b64e(JSON.stringify(merged))};
+      if(sync.sha)body.sha=sync.sha;
+      const r=await ghReq('PUT',body);
+      if((r.status===409||r.status===422)&&tries<2){ syncing=false; return await syncNow(tries+1); }
+      if(!r.ok){ syncing=false;sync.dirty=true;persistSync();syncState('err','서버 '+r.status);return false; }
+      const j=await r.json(); sync.sha=j.content.sha;
+    }
+    sync.last=Date.now(); sync.dirty=false; persistSync(); syncing=false; syncState('ok'); return true;
+  }catch(e){
+    pulling=false; syncing=false; sync.dirty=true; persistSync();
+    syncState(navigator.onLine?'err':'wait', navigator.onLine?'인터넷/서버 응답 없음':'');
+    return false;
+  }
 }
 async function connectSync(token){
   sync.token=(token||'').trim(); if(!sync.token)return;
-  syncState('sync');
-  try{
-    const r=await ghReq('GET');
-    if(r.status===401||r.status===403){syncState('err','토큰 권한');toast('토큰이 틀렸거나 권한 부족 ⚠️');sync.token='';return;}
-    if(!r.ok){syncState('err',r.status);return;}
-    const j=await r.json(); sync.sha=j.sha;
-    const remote=JSON.parse(b64d(j.content));
-    if(isEmptyData(remote)){ await push(); toast('이 기기 내용을 올렸어요 ☁️'); }
-    else { pulling=true; db=remote; ensureShape(); localStorage.setItem(KEY,JSON.stringify(db)); renderAll(); pulling=false; toast('서버 내용으로 맞췄어요 ☁️'); }
-    sync.last=Date.now(); persistSync(); syncState('ok');
-  }catch(e){syncState('err','연결');}
+  const ok=await syncNow();
+  toast(ok?'연결됐어요 · 양쪽 내용을 합쳤습니다 ☁️':'연결 실패 — 토큰을 다시 확인해 주세요 ⚠️');
+  if(!ok&&!sync.last){sync.token='';persistSync();syncState('off');}
 }
-syncBtn.onclick=()=>{document.getElementById('syncToken').value='';syncModal.classList.add('show');syncState(sync.token?'ok':'off');};
-document.getElementById('syncConnect').onclick=()=>{const t=document.getElementById('syncToken').value;if(t)connectSync(t);else if(sync.token)pull();};
-document.getElementById('syncNow').onclick=()=>{sync.token?pull():toast('먼저 토큰을 연결하세요');};
+syncBtn.onclick=()=>{document.getElementById('syncToken').value='';syncModal.classList.add('show');syncState(sync.token?(sync.dirty?'err':'ok'):'off',sync.dirty?'올릴 게 남아 있음':'');};
+document.getElementById('syncConnect').onclick=()=>{const t=document.getElementById('syncToken').value;if(t)connectSync(t);else if(sync.token)syncNow();};
+document.getElementById('syncNow').onclick=()=>{sync.token?syncNow():toast('먼저 토큰을 연결하세요');};
 document.getElementById('syncOff').onclick=()=>{sync={};persistSync();syncState('off');toast('연결 해제됨');};
 document.getElementById('syncClose').onclick=()=>syncModal.classList.remove('show');
 syncModal.onclick=e=>{if(e.target===syncModal)syncModal.classList.remove('show');};
-document.addEventListener('visibilitychange',()=>{if(!document.hidden&&sync.token)pull();});
+document.getElementById('syncBar').onclick=()=>{syncBtn.click();if(sync.token)syncNow();};
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&sync.token)syncNow();});
+window.addEventListener('online',()=>{if(sync.token)syncNow();});
+setInterval(()=>{if(sync.token&&sync.dirty&&navigator.onLine)syncNow();},60000);   // 못 올린 게 있으면 1분마다 재시도
 
 /* ---- theme ---- */
 const root=document.documentElement;
@@ -985,8 +1053,20 @@ themeBtn.onclick=()=>setTheme(root.getAttribute('data-theme')==='dark'?'light':'
 setTheme(localStorage.getItem('jiwoon_theme')|| (matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light'));
 
 /* ---- init ---- */
+/* 1회 정리: 수정시각(u)이 없는 항목 = 이 기기에 남아 있던 예전 샘플 데이터.
+   회고·주간기록은 손대지 않고 할일·관계도만 비운다. (2026-08 샘플 삭제 시점 기준) */
+if(localStorage.getItem('jiwoon_ver')!=='2'){
+  ensureShape();
+  const drop=(arr,kind,keyOf)=>arr.filter(it=>{ if(it.u)return true; db.tomb[kind][keyOf(it)]=ts(); return false; });
+  db.cards=drop(db.cards,'cards',c=>c.id);
+  db.net.nodes=drop(db.net.nodes,'nodes',n=>n.id);
+  db.net.links=drop(db.net.links,'links',linkKey);
+  localStorage.setItem('jiwoon_ver','2');
+  localStorage.setItem(KEY,JSON.stringify(db));
+}
+ensureShape();
 renderBoard();refreshDay();refreshWeek();renderInsight();
-if(sync.token){syncState('ok');pull();}else{syncState('off');}
+if(sync.token){syncState('sync');syncNow();}else{syncState('off');}
 </script>
 </body>
 </html>
